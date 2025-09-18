@@ -1,0 +1,43 @@
+# Bazel output and cache
+bazel-*
+bazel-out/
+bazel-bin/
+bazel-testlogs/
+bazel-cache/
+bazel-workspace/
+MODULE.bazel.lock
+
+# VS Code settings
+.vscode/
+
+# CLion/IntelliJ settings
+.idea/
+cmake-build-*/
+
+# Mac system files
+.DS_Store
+
+# Build artifacts
+*.o
+*.obj
+*.so
+*.dll
+*.exe
+*.a
+*.log
+
+# Generated files
+*.pyc
+__pycache__/
+
+# External dependencies (managed by Bazel)
+external/
+
+# Test and coverage output
+*.gcda
+*.gcno
+*.gcov
+
+# Misc
+*.swp
+*.swo
