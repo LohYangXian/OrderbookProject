@@ -12,10 +12,8 @@ All results and learnings will be documented here in detail.
 
 - Build a **order book engine** that supports:
   - Limit Orders
-  - Market Orders
-  - Cancels
-  - Modifications
   - Order Matching
+  - Trade Generation
 - Test using **real exchange order flows** (Binance WebSocket) and snapshots for realism.
 - Optimize aggressively with a focus on **nanosecond-level latency** and **throughput scaling**.
 - Track and publish **performance improvements** at each iteration.
@@ -63,9 +61,9 @@ At each iteration:
 - Build websocket client to ingest live order flow.
 - Save raw messages to be used as snapshots for replay. (For Performance consistency)
 - Implement basic order book engine with naive data structures (e.g. `std::map`, `std::list`).
-- Support limit orders, market orders, cancels, modifications and order matching.
+- Support limit orders, order matching and trade generation.
+- Cover workflow from order ingestion to matching to trade generation.
 - Measure baseline latency and throughput using `std::chrono`, `rdtsc`, and `perf`.
-
 
 ## References
 
@@ -74,3 +72,5 @@ At each iteration:
 
 ### Data Sources
 - [Binance WebSocket API Documentation](https://developers.binance.com/docs/binance-spot-api-docs/web-socket-streams)
+- [Binance How to manage a local order book correctly](https://developers.binance.com/docs/derivatives/usds-margined-futures/websocket-market-streams/How-to-manage-a-local-order-book-correctly)
+- [WebSocket API: Order Book](https://developers.binance.com/docs/derivatives/usds-margined-futures/market-data/websocket-api)
