@@ -69,8 +69,8 @@ struct Order {
 - **quantity (`uint32_t`)**:  
   Quantity is stored in milli-units (three significant figures) as an unsigned 32-bit integer. This allows for accurate representation of fractional quantities (e.g., 0.112 BTC is stored as 112). The range of `uint32_t` is more than enough for typical trading quantities, and using an integer type ensures precision and performance.
 
-- **fillQuantity (`uint32_t`)**:  
-  Like `quantity`, this tracks the filled portion of an order in milli-units, using an unsigned 32-bit integer for the same reasons.
+- **unfilledQuantity (`uint32_t`)**:  
+  Like `quantity`, this tracks the unfilled portion of an order in milli-units, using an unsigned 32-bit integer for the same reasons.
 
 - **orderId (`uint64_t`)**:  
   Order IDs are stored as unsigned 64-bit integers to support a very large number of unique orders over time, ensuring no risk of overflow. No negative order IDs are expected, so an unsigned type is appropriate.
