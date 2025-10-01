@@ -69,6 +69,7 @@ At each iteration:
 
 ### C++ Resources
 - [C++ Design Patterns for Low-Latency Applications including High-Frequency Trading](https://arxiv.org/pdf/2309.04259)
+- Effective Modern C++ by Scott Meyers
 
 ### Data Sources
 - [Binance WebSocket API Documentation](https://developers.binance.com/docs/binance-spot-api-docs/web-socket-streams)
@@ -77,3 +78,4 @@ At each iteration:
 
 ### Order Book Implementations
 - Market Microstructure Theory, by Maureen O'Hara
+- [OrderBook Repository by TheCodingJesus](https://github.com/Tzadiko/Orderbook/tree/master)

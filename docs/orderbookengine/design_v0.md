@@ -117,3 +117,4 @@ struct Trade {
 ## Future Enhancements
 - Use depth request together with websocket updates to initialize and maintain the orderbook. [WebSocket API: Order Book](https://developers.binance.com/docs/derivatives/usds-margined-futures/market-data/websocket-api)
 - Implement simple validation on websocket message payloads. [Binance How to manage a local order book correctly](https://developers.binance.com/docs/derivatives/usds-margined-futures/websocket-market-streams/How-to-manage-a-local-order-book-correctly)
+- Support other message types (e.g. FIX protocol)

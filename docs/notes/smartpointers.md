@@ -89,9 +89,29 @@ int main() {
     return 0;
 }
 ```
+#### 4. `std::make_shared`
+
+- **`std::make_shared<T>(...)`** is a function that:
+  - Allocates a new object of type `T`.
+  - Returns a `std::shared_ptr<T>` that owns the object.
+  - Combines object creation and smart pointer management in one step.
+
+- Why use `std::make_shared`?
+    - It is efficient: allocates the object and control block together.
+    - It is safe: prevents memory leaks and exceptions during construction.
+    - It is convenient: no need to use `new` manually.
+
+##### Example
+
+```cpp
+OrderPointer order = std::make_shared<Order>(OrderType::GoodTillCancel, 123, Side::Buy, 100, 10);
+// Creates a new Order object and returns a shared_ptr managing it
+```
 
 ### Summary
 - Use `std::unique_ptr` when you want single ownership of a resource.
 - Use `std::shared_ptr` when you need shared ownership and reference counting.
 - Use `std::weak_ptr` to hold a non-owning reference to an object managed by `std::shared_ptr`, especially to avoid circular references.
 - Always prefer smart pointers over raw pointers for dynamic memory management in modern C++ to ensure safety and clarity in your code.
+- Use `std::make_shared` to create and manage objects with `std::shared_ptr` in a single, safe, and efficient step.
+
