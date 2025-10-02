@@ -27,3 +27,8 @@ In C++, the keyword `const` is used to define constants and to indicate that cer
 
 - **Use reference (`const Type&`)** for large objects to avoid copying.
 - **Use value** for small, simple types—copying is cheap and safe.
+
+
+### Pragma
+
+- Use `#pragma once` at the top of header files to prevent multiple inclusions of the same header file, which can lead to redefinition errors. It is a modern alternative to traditional include guards.

@@ -1,7 +1,14 @@
 cc_library(
-    name = "order_book",
-    srcs = ["om/order_book.cpp"],
-    hdrs = ["om/order_book.h"],
+    name = "Orderbook",
+    srcs = ["om/Orderbook.cpp"],
+    hdrs = [
+        "om/Orderbook.h",
+        "om/Usings.h",
+        "om/Side.h",
+        "om/Order.h",
+        "om/TradeInfo.h",
+        "om/Trade.h",
+    ],
     copts = ["-std=c++20"],
     deps = [
         "@nlohmann_json//:json",
@@ -13,7 +20,7 @@ cc_binary(
     srcs = ["main.cpp"],
     copts = ["-std=c++20"],
     deps = [
-        ":order_book",
+        ":Orderbook",
         "@nlohmann_json//:json",
     ],
 )

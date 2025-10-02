@@ -12,6 +12,7 @@ using websocketpp::lib::placeholders::_1;
 using websocketpp::lib::placeholders::_2;
 using websocketpp::lib::bind;
 
+// This Websocket processes Binance websocket depth stream and saves the raw JSON messages to a file
 void on_open(websocketpp::connection_hdl hdl, client* c) {
     std::cout << "Connection opened" << std::endl;
 
