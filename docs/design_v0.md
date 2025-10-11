@@ -2,7 +2,7 @@
 
 ## Overview
 
-This project aims to build and benchmark a minimal, high-performance order book engine that parses and processes **generic JSON orders**. The workflow involves maintaining a local order book, injecting synthetic or client-provided orders, matching trades, and measuring engine performance under controlled conditions.
+This project aims to build and benchmark a minimal, high-performance order book engine that parses and processes **generic JSON orders**. The workflow involves maintaining a local limit order book, injecting synthetic or client-provided orders, matching trades, and measuring engine performance under controlled conditions.
 
 ---
 

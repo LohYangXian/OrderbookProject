@@ -1,26 +1,25 @@
-cc_library(
-    name = "Orderbook",
-    srcs = ["om/Orderbook.cpp"],
-    hdrs = [
-        "om/Orderbook.h",
-        "om/Usings.h",
-        "om/Side.h",
-        "om/Order.h",
-        "om/TradeInfo.h",
-        "om/Trade.h",
-    ],
+cc_binary(
+    name = "main_manual",
+    srcs = ["main_manual.cpp"],
     copts = ["-std=c++20"],
     deps = [
+        "//src/om:Orderbook",
         "@nlohmann_json//:json",
     ],
 )
 
 cc_binary(
-    name = "main",
-    srcs = ["main.cpp"],
-    copts = ["-std=c++20"],
+    name = "main_server",
+    srcs = ["main_server.cpp"],
+    copts = [
+        "-std=c++20",
+        ], 
     deps = [
-        ":Orderbook",
+        "//src/server:Server",
+        "//src/om:Orderbook",
         "@nlohmann_json//:json",
+        ],   
+    linkopts = [
+        "-lprofiler",
     ],
 )

@@ -9,13 +9,23 @@
 #include "Order.h"
 #include "TradeInfo.h"
 #include "Trade.h"
+#include "OrderModify.h"
 
 class Orderbook 
 {
 private:
+
+    struct OrderEntry {
+        OrderPointer order_{ nullptr };
+        OrderPointers::iterator location_;
+    };
+
     std::map<Price, OrderPointers, std::greater<Price>> bids_; // Price -> Queue of Orders
     std::map<Price, OrderPointers, std::less<Price>> asks_; // Price -> Queue of Orders
+    std::unordered_map<OrderId, OrderEntry> orders_; // OrderId -> OrderEntry for quick lookup, this is to support cancel/modify
     mutable std::mutex ordersMutex_;
+
+    Trades matchOrders();
 
 public:
 
@@ -30,11 +40,13 @@ public:
 
     Trades addOrder(const OrderPointer& order);
    
-    // void cancelOrder(OrderId orderId);
-    // void modifyOrder(OrderId orderId, Quantity newQuantity);
+    void cancelOrder(OrderId orderId);
+    Trades modifyOrder(OrderModify order);
     
-    Trades matchOrders();
-
     void printOrderBook() const;
+
+    // For testing purposes
+    const auto& getBids() const { return bids_; }
+    const auto& getAsks() const { return asks_; }
 };
 

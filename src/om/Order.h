@@ -26,7 +26,7 @@ public:
     bool isFilled() const { return unfilledQuantity_ == 0; }
     void fill(Quantity qty) { 
         if (qty > unfilledQuantity_) {
-            throw std::logic_error(std::format("Order ({}) cannot be filled for more than its remaining quantity.", getOrderId()));
+            return; // Or throw an exception
         }
         unfilledQuantity_ -= qty; 
     }
