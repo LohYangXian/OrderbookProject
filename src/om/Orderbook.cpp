@@ -220,7 +220,7 @@ Trades Orderbook::modifyOrder(OrderModify order)
         if (!orders_.contains(order.getOrderId())) {
             return { }; // Order not found
         }
-    }
+        
 
     cancelOrder(order.getOrderId());
     return addOrder(order.toOrderPointer());

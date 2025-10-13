@@ -1,7 +1,7 @@
-### Smart Pointers in C++
+# Smart Pointers in C++
 Smart pointers are a crucial feature in C++ that help manage dynamic memory automatically, reducing the risk of memory leaks and dangling pointers. They are part of the C++ Standard Library and are defined in the `<memory>` header. The three primary types of smart pointers are `std::unique_ptr`, `std::shared_ptr`, and `std::weak_ptr`.
 
-#### 1. `std::unique_ptr`
+## `std::unique_ptr`
 - Represents exclusive ownership of a dynamically allocated object.
 - Cannot be copied, only moved.
 - Move semantics allow transferring ownership from one `unique_ptr` to another. It is used when you want a single owner for a resource.
@@ -29,7 +29,7 @@ int main() {
 }
 ```
 
-#### 2. `std::shared_ptr`
+## `std::shared_ptr`
 - Represents shared ownership of a dynamically allocated object.
 - Can be copied, and multiple `shared_ptr` instances can point to the same object.
 - Uses reference counting to keep track of how many `shared_ptr` instances point to the same object.
@@ -57,7 +57,7 @@ int main() {
 }
 ```
 
-#### 3. `std::weak_ptr`
+## `std::weak_ptr`
 - Represents a non-owning reference to an object managed by `std::shared_ptr`.
 - Does not affect the reference count of the object.
 - Used to break circular references that can lead to memory leaks.
@@ -89,7 +89,7 @@ int main() {
     return 0;
 }
 ```
-#### 4. `std::make_shared`
+## `std::make_shared`
 
 - **`std::make_shared<T>(...)`** is a function that:
   - Allocates a new object of type `T`.
@@ -101,14 +101,14 @@ int main() {
     - It is safe: prevents memory leaks and exceptions during construction.
     - It is convenient: no need to use `new` manually.
 
-##### Example
+### Example
 
 ```cpp
 OrderPointer order = std::make_shared<Order>(OrderType::GoodTillCancel, 123, Side::Buy, 100, 10);
 // Creates a new Order object and returns a shared_ptr managing it
 ```
 
-### Summary
+# Summary
 - Use `std::unique_ptr` when you want single ownership of a resource.
 - Use `std::shared_ptr` when you need shared ownership and reference counting.
 - Use `std::weak_ptr` to hold a non-owning reference to an object managed by `std::shared_ptr`, especially to avoid circular references.

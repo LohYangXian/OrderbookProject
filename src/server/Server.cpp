@@ -13,6 +13,12 @@ Server::Server(int port, Orderbook* orderbook)
     : port_(port), orderbook_(orderbook) {}
 
 void Server::run() {
+    // Notes:
+    // AF_INET: IPv4
+    // SOCK_STREAM: TCP
+    // 0: default protocol (TCP for SOCK_STREAM)
+    // UDP would be SOCK_DGRAM
+    
     int server_fd = socket(AF_INET, SOCK_STREAM, 0);
     if (server_fd == -1) {
         std::cerr << "Socket creation failed\n";

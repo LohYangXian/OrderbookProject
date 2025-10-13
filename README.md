@@ -27,13 +27,44 @@ This project is meant as my pet project to learn **C++**, **systems-level thinki
 
 ## Design
 
-// Insert design diagram here
+          +-----------------+
+          |      Client     |
+          | (JSON Orders)   |
+          +--------+--------+
+                   |
+                   v
+          +-----------------+
+          |      Server     |
+          | (Order Router)  |
+          +--------+--------+
+                   |
+                   v
+          +-----------------+
+          | Order Book      |
+          | Engine (C++)    |
+          | - Add/Cancel    |
+          | - Modify        |
+          | - Match Orders  |
+          | - Generate Trades|
+          +--------+--------+
+                   |
+                   v
+          +-----------------+
+          |      Server     |
+          | (JSON Response) |
+          +--------+--------+
+                   |
+                   v
+          +-----------------+
+          |      Client     |
+          +-----------------+
+
 
 Client sends JSON orders to Server -> Server processes orders through Order Book Engine -> Server returns JSON responses indicating trade execution or order addition.
 
-Round Trip Time (RTT) is measured from Client order submission to Server acknowledgment.
+**Round Trip Time** (RTT) is measured from Client order submission to Server acknowledgment.
 
-Performance metrics such as latency (ns/op), throughput (orders/sec), and memory usage are tracked at each iteration.
+Performance metrics such as **latency** (ns/op), **throughput** (orders/sec), and **memory usage** are tracked at each iteration.
 
 ---
 
@@ -44,7 +75,7 @@ Performance metrics such as latency (ns/op), throughput (orders/sec), and memory
 - **Testing/Benchmarking**:
   - Google Benchmark
   - `std::chrono` + `rdtsc`
-  - `gperf` for cache misses/branch mispredicts
+  - `Apple's Time Profiler` for CPU profiling
 - **Data Source**:
   - Binance WebSocket API (`btcusdt@depth`, `btcusdt@trade`)
   - Historical feeds for reproducibility
@@ -63,69 +94,43 @@ At each iteration:
 3. Log results in `results.csv`
 4. Plot latency/throughput across iterations
 
+
+### Using `Apple's Time Profiler` to Measure Performance
+
+The time profiler is attached to the server process to measure CPU usage and latency.
+
+---
+
 ## How to run it
 
-To build the project (manual mode), run:
-```bash
-bazel build //src:main_manual
-```
-
-To run the main manual application:
-```bash
-bazel run //src:main_manual
-```
-
-To build the project (server mode), run:
+### Build the Server:
 ```bash
 bazel build //src:main_server
 ```
 
-To run the main server application:
+### Run the Server:
 ```bash
 bazel run //src:main_server
 ```
 
-To run the tests:
+### Run the Tests:
 ```bash
 bazel test //tests:orderbook_test
 ```
 
-## Using `gperf` to Measure Performance
+### Run the Client:
+Just open `py_client/client.ipynb` in Jupyter and run the cells.
 
-To measure performance using `gperf`, follow these steps:
-
-1. **Build the Project (Don't use Bazel, brew install needed libraries)** 
-    ```bash 
-    g++ -std=c++20 -g -I/opt/homebrew/include -Isrc/om -Isrc/server -L/opt/homebrew/lib src/server/Server.cpp src/main_server.cpp src/om/Orderbook.cpp -lprofiler -o main_server
-    ```
-
-2. **Start the server with gperf recording:**
-    ```bash
-    CPUPROFILE=orderbook_server.prof DYLD_INSERT_LIBRARIES=/opt/homebrew/lib/libprofiler.dylib ./main_server
-    ```
-
-2. **Run the client to send orders to the server:**
-    ```bash
-    python py_client/client.py
-    ```
-
-3. **Stop the server (Ctrl+C) after the client finishes.**
-
-4. **Generate the perf report:**
-    ```bash
-    brew install go
-    go install github.com/google/pprof@latest
-    pprof --text ./bazel-bin/src/main_server orderbook_server.prof
-    ```
+---
 
 ## Versions of Orderbook Engine
 
 ### v0: Baseline Implementations
-- Implement basic order book engine with naive data structures (e.g. `std::map`, `std::list`).n
+- Implement basic order book engine with naive data structures (e.g. `std::map`, `std::list`).
 - Support limit orders, order adding, order modifying, order cancelling, order matching and trade generation.
 - Basic mutex locking for thread safety.
 - Cover workflow from order ingestion to matching to trade generation.
-- Measure baseline latency and throughput using `std::chrono`, `rdtsc`, and `gperf`.
+- Measure baseline latency and throughput using `std::chrono`, `rdtsc`, and `Apple's Time Profiler`.
 
 #### v0: Benchmark Results
 
@@ -138,11 +143,11 @@ To measure performance using `gperf`, follow these steps:
 - **CANCEL orders:** mean = 292.80μs, p95 = 396μs, p99 = 616.90μs
 
 ![RTT Histogram 1 thread](/results/v0/RTT_ALL_single.png)
+
 ![RTT Histogram NEW](/results/v0/RTT_NEW_single.png)
 ![RTT Histogram MODIFY](/results/v0/RTT_MODIFY_single.png)
 ![RTT Histogram CANCEL](/results/v0/RTT_CANCEL_single.png)
 
----
 
 **Multi-threaded (4 threads, 50,000 orders):**
 
@@ -157,7 +162,17 @@ To measure performance using `gperf`, follow these steps:
 ![RTT Histogram MODIFY](/results/v0/RTT_MODIFY_4threads.png)
 ![RTT Histogram CANCEL](/results/v0/RTT_CANCEL_4threads.png)
 
----
+
+![V0 CPU Profiler Flamegraph](/results/v0/flamegraph.png)
+
+![V0 CPU Profiler Latency](/results/v0/latency.png)
+
+| Function                                 | % CPU | Notes                                        |
+| ---------------------------------------- | ----- | -------------------------------------------- |
+| `lck_mtx_sleep`                          | 76.7% | Threads blocked on mutexes / lock contention |
+| JSON parsing / serialization             | <1%   | Minor CPU usage                              |
+| `tiny_malloc_should_clear` / `free_tiny` | ~1%   | Minimal memory overhead                      |
+
 
 #### **Summary & Analysis**
 
@@ -165,11 +180,21 @@ To measure performance using `gperf`, follow these steps:
 - **Multi-threaded mode** nearly doubles throughput, but increases mean and tail latencies (p95/p99), likely due to lock contention and resource sharing.
 - **NEW, MODIFY, and CANCEL** order types have similar latency profiles, with CANCEL being slightly faster on average.
 - **RTT histograms** show a tight distribution for single-threaded, and a wider spread with higher outliers for multi-threaded, indicating more variability under concurrency.
+- **CPU profiling** reveals that the majority of CPU time is spent waiting on mutexes (`lck_mtx_sleep`), not on actual order processing or JSON parsing.
 - **Optimization opportunities:**  
   - Reduce lock contention and improve data structure efficiency for better multi-threaded scaling.
   - Profile and optimize critical paths in order processing and matching.
 
 *These results provide a baseline for future optimizations and highlight the tradeoff between throughput and latency as concurrency increases.*
+
+---
+
+## v1: Replace Mutex Locks with Faster Alternatives
+- TODO: Find a faster locking mechanism (e.g. spinlocks, reader-writer locks) or use lock-free data structures.
+- Measure impact on latency and throughput. 
+- Analyze CPU profiling to see if lock contention is reduced.
+
+---
 
 ## References
 
@@ -186,10 +211,13 @@ To measure performance using `gperf`, follow these steps:
 - Market Microstructure Theory, by Maureen O'Hara
 - [OrderBook Repository by TheCodingJesus](https://github.com/Tzadiko/Orderbook/tree/master)
 
+---
 
-## TODO:
-- Fix the gPerf instructions (they are broken)
-- After fixing gPerf instructions, add gPerf results for v0
-- Add more profiling results (cache misses, branch mispredicts, etc)
-- Add design diagrams
-- After v0 is done, add v1, v2, etc with detailed changes and results
+## TODO
+- Implement v1 optimizations and benchmark.
+  - Replace mutexes with faster alternatives.
+
+- Implement v2 optimizations and benchmark.
+  - Optimize data structures for order storage and matching.
+  - Explore memory pool allocators to reduce allocation overhead.
+  - Optimize JSON parsing/serialization if it becomes a bottleneck.
