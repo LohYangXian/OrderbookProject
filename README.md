@@ -125,6 +125,47 @@ bazel test //tests:orderbook_test
 ### Run the Client:
 Just open `py_client/client.ipynb` in Jupyter and run the cells.
 
+### Profile Server-Side Functions (Linux/WSL)
+
+Use Linux `perf` to find hot functions inside the C++ server process.
+
+1. Install perf (Ubuntu/WSL):
+```bash
+sudo apt-get update
+sudo apt-get install -y linux-tools-common linux-tools-generic linux-cloud-tools-generic
+```
+On WSL, `linux-tools-$(uname -r)` often does not exist. The helper script auto-detects a usable perf binary under `/usr/lib/linux-tools/...`.
+
+2. Run profiling with the helper script:
+```bash
+./scripts/profile_server_perf.sh 20 results/profile_run_01
+```
+This command now runs a built-in client workload automatically, so the server is actively exercised during profiling.
+
+To control built-in load concurrency, pass `num_threads` as the 4th argument:
+```bash
+./scripts/profile_server_perf.sh 20 results/profile_run_01 "" 4
+```
+When a custom `client_command` is provided, `num_threads` is ignored.
+
+3. Optional: run client workload automatically while profiling:
+```bash
+./scripts/profile_server_perf.sh 20 results/profile_run_01 "python3 py_client/client.py"
+```
+Use this when you want to profile with your own workload instead of the built-in one.
+
+4. Read results:
+- `results/profile_run_01/perf-report.txt` for hot functions
+- `results/profile_run_01/server.log` for server runtime logs
+
+Notes:
+- The script builds with `-g` and `-fno-omit-frame-pointer` to improve stack quality.
+- If `perf record` fails due permissions, try:
+```bash
+sudo sysctl kernel.perf_event_paranoid=1
+sudo sysctl kernel.kptr_restrict=0
+```
+
 ---
 
 ## Versions of Orderbook Engine
