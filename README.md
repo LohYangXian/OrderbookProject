@@ -6,6 +6,10 @@ The goal is to implement a baseline order book engine, then iteratively apply op
 
 All results and learnings will be documented here in detail.
 
+## Windows Setup Guide
+
+For a full Windows setup walkthrough (WSL install, Ubuntu setup, toolchain install, Bazel, Python packages, build, test, and run), see [README_windows_setup.md](README_windows_setup.md).
+
 ---
 
 ## Project Vision

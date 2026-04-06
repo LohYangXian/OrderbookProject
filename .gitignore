@@ -29,6 +29,7 @@ cmake-build-*/
 # Generated files
 *.pyc
 __pycache__/
+py_client/.venv/
 
 # External dependencies (managed by Bazel)
 external/

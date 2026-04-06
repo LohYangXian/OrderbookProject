@@ -1,3 +1,5 @@
+load("@rules_cc//cc:defs.bzl", "cc_binary")
+
 cc_binary(
     name = "main_manual",
     srcs = ["main_manual.cpp"],
@@ -18,8 +20,5 @@ cc_binary(
         "//src/server:Server",
         "//src/om:Orderbook",
         "@nlohmann_json//:json",
-        ],   
-    linkopts = [
-        "-lprofiler",
-    ],
+        ],
 )

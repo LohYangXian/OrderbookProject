@@ -213,18 +213,16 @@ void Orderbook::cancelOrder(OrderId orderId)
 
 Trades Orderbook::modifyOrder(OrderModify order)
 {
-
     {
         std::scoped_lock lock(ordersMutex_);
-
         if (!orders_.contains(order.getOrderId())) {
             return { }; // Order not found
         }
-        
+    }
 
     cancelOrder(order.getOrderId());
     return addOrder(order.toOrderPointer());
-};
+}
 
 Trades Orderbook::matchOrders() {
     Trades trades;
@@ -285,7 +283,7 @@ void Orderbook::printOrderBook() const
         for (const auto& order : orders) {
             totalQty += order->getUnfilledQuantity();
         }
-        std::cout << std::format("Price: ${}, Total Quantity: {}\n", price, totalQty);
+        std::cout << "Price: $" << price << ", Total Quantity: " << totalQty << "\n";
     }
 
     std::cout << "Asks:\n";
@@ -294,6 +292,6 @@ void Orderbook::printOrderBook() const
         for (const auto& order : orders) {
             totalQty += order->getUnfilledQuantity();
         }
-        std::cout << std::format("Price: ${}, Total Quantity: {}\n", price, totalQty);
+        std::cout << "Price: $" << price << ", Total Quantity: " << totalQty << "\n";
     }
-};
+}

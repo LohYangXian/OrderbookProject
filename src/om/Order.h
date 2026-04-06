@@ -1,7 +1,6 @@
 #pragma once
 
 #include <list>
-#include <format>
 
 #include "Usings.h"
 #include "Side.h"
