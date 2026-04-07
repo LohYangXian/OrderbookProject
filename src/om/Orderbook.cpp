@@ -28,7 +28,7 @@ json Orderbook::processJsonMessage(const json& message)
     } else if (type == "MODIFY") {
         if (!message.contains("OrderId") || !message.contains("Price") || 
             !message.contains("Quantity") || !message.contains("Side")
-            || !message.contains("Pair")) {
+            || !message.contains("Pair") || message["Pair"] != "BTC/USDT") {
             return json{{"status", "error"}, {"message", "Invalid MODIFY message format"}};
         }
         OrderId orderId = static_cast<OrderId>(message["OrderId"]);
@@ -72,7 +72,8 @@ json Orderbook::processJsonMessage(const json& message)
 
     // Step 1: Validate the message structure
     if (!message.contains("OrderId") || !message.contains("Pair") || !message.contains("Price") || 
-        !message.contains("Quantity") || !message.contains("Side")) {
+        !message.contains("Quantity") || !message.contains("Side")
+        || message["Pair"] != "BTC/USDT") {
         return json{{"status", "error"}, {"message", "Invalid message format"}};
     }
 

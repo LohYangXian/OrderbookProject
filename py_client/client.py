@@ -1,63 +1,63 @@
 import socket
 import time
+import json
 import random
 import csv
 
 HOST = 'localhost'
 PORT = 8000
 NUM_ORDERS = 10000
-CLIENT_ID = 1
-SYM = "BTC/USDT"
 
 order_ids = []
 rtts = []
-type_rtts = {"N": [], "M": [], "C": []}
+type_rtts = {"NEW": [], "MODIFY": [], "CANCEL": []}
 next_order_id = 1
-ts = 0
 
 def random_order():
-    """Return (cmd, fix_message_string) for a randomly chosen order action.
-
-    FIX-like format: ts=<ts>|client=<id>|cmd=<N|M|C>|id=<oid>|sym=<sym>|side=<B|S>|px=<price>|qty=<qty>
-    Cancel messages omit sym/side/px/qty fields.
-    """
-    global next_order_id, ts
-    ts += 1
-    cmd = random.choices(["N", "M", "C"], weights=[0.7, 0.2, 0.1])[0]
-    if cmd == "N" or not order_ids:
-        oid = next_order_id
+    global next_order_id
+    order_type = random.choices(["NEW", "MODIFY", "CANCEL"], weights=[0.7, 0.2, 0.1])[0]
+    if order_type == "NEW" or not order_ids:
+        order = {
+            "Type": "NEW",
+            "OrderId": next_order_id,
+            "Pair": "BTC/USDT",
+            "Price": str(random.randint(90000, 110000)),
+            "Quantity": str(random.randint(1, 10)),
+            "Side": random.choice(["BUY", "SELL"])
+        }
+        order_ids.append(next_order_id)
         next_order_id += 1
-        order_ids.append(oid)
-        px = random.randint(90000, 110000)
-        qty = random.randint(1, 10)
-        side = random.choice(["B", "S"])
-        msg = f"ts={ts}|client={CLIENT_ID}|cmd=N|id={oid}|sym={SYM}|side={side}|px={px}|qty={qty}"
-        return "N", msg
-    elif cmd == "M":
+    elif order_type == "MODIFY":
         oid = random.choice(order_ids)
-        px = random.randint(90000, 110000)
-        qty = random.randint(1, 10)
-        side = random.choice(["B", "S"])
-        msg = f"ts={ts}|client={CLIENT_ID}|cmd=M|id={oid}|sym={SYM}|side={side}|px={px}|qty={qty}"
-        return "M", msg
-    else:  # C - cancel
+        order = {
+            "Type": "MODIFY",
+            "OrderId": oid,
+            "Pair": "BTC/USDT",
+            "Price": str(random.randint(90000, 110000)),
+            "Quantity": str(random.randint(1, 10)),
+            "Side": random.choice(["BUY", "SELL"])
+        }
+    else:  # CANCEL
         oid = random.choice(order_ids)
+        order = {
+            "Type": "CANCEL",
+            "OrderId": oid
+        }
         order_ids.remove(oid)
-        msg = f"ts={ts}|client={CLIENT_ID}|cmd=C|id={oid}"
-        return "C", msg
+    return order_type, order
 
 for _ in range(NUM_ORDERS):
-    cmd, msg = random_order()
-    data = msg.encode()
+    order_type, order = random_order()
+    msg = json.dumps(order).encode()
     t0 = time.time_ns()
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.connect((HOST, PORT))
-        s.sendall(data)
+        s.sendall(msg)
         response = s.recv(4096)
     t1 = time.time_ns()
     rtt_us = (t1 - t0) // 1000
     rtts.append(rtt_us)
-    type_rtts[cmd].append(rtt_us)
+    type_rtts[order_type].append(rtt_us)
 
 # # Save RTTs to CSV
 # with open("rtts.csv", "w", newline="") as f:
