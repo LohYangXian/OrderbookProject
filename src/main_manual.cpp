@@ -5,7 +5,7 @@
 #include <chrono>
 #include <vector>
 
-json generateRandomOrderJson() {
+std::string generateRandomFixMessage() {
     static int orderId = 1;
     static std::default_random_engine rng(std::random_device{}());
     std::uniform_int_distribution<int> typeDist(0, 2); // 0: NEW, 1: MODIFY, 2: CANCEL
@@ -13,31 +13,28 @@ json generateRandomOrderJson() {
     std::uniform_int_distribution<int> priceDist(9900, 11000);
     std::uniform_int_distribution<int> qtyDist(1, 100);
 
-    json j;
     int type = typeDist(rng);
-    // NEW Order
+    constexpr const char* symbol = "NVDA";
+
     if (type == 1 && orderId > 1) { // MODIFY existing order
         std::uniform_int_distribution<int> existingOrderIdDist(1, orderId - 1);
-        j["Type"] = "MODIFY";
-        j["OrderId"] = existingOrderIdDist(rng);
-        j["Pair"] = "BTC/USDT";
-        j["Price"] = std::to_string(priceDist(rng));
-        j["Quantity"] = std::to_string(qtyDist(rng));
-        j["Side"] = sideDist(rng) == 0 ? "BUY" : "SELL";
+        return "8=FIX.4.2|35=G|11=" + std::to_string(existingOrderIdDist(rng))
+            + "|55=" + symbol
+            + "|54=" + std::to_string(sideDist(rng) == 0 ? 1 : 2)
+            + "|44=" + std::to_string(priceDist(rng))
+            + "|38=" + std::to_string(qtyDist(rng)) + "|";
     } else if (type == 2 && orderId > 1) { // CANCEL existing order
         std::uniform_int_distribution<int> existingOrderIdDist(1, orderId - 1);
-        j["Type"] = "CANCEL";
-        j["OrderId"] = existingOrderIdDist(rng);
+        return "8=FIX.4.2|35=F|11=" + std::to_string(existingOrderIdDist(rng)) + "|";
     } else {
         // Fallback to NEW if no existing orders to modify/cancel
-        j["Type"] = "NEW";
-        j["OrderId"] = orderId++;
-        j["Pair"] = "BTC/USDT";
-        j["Price"] = std::to_string(priceDist(rng));
-        j["Quantity"] = std::to_string(qtyDist(rng));
-        j["Side"] = sideDist(rng) == 0 ? "BUY" : "SELL";
+        const int currentOrderId = orderId++;
+        return "8=FIX.4.2|35=D|11=" + std::to_string(currentOrderId)
+            + "|55=" + symbol
+            + "|54=" + std::to_string(sideDist(rng) == 0 ? 1 : 2)
+            + "|44=" + std::to_string(priceDist(rng))
+            + "|38=" + std::to_string(qtyDist(rng)) + "|";
     }
-    return j;
 }
 
 int main() {
@@ -48,13 +45,13 @@ int main() {
 
     const int NUM_ORDERS = 1000000;
     for (int i = 0; i < NUM_ORDERS; ++i) {
-        json randomOrder = generateRandomOrderJson();
+        std::string fixMessage = generateRandomFixMessage();
         auto start = std::chrono::high_resolution_clock::now();
-        auto response = orderbook.processJsonMessage(randomOrder);
+        std::string response = orderbook.processFixMessage(fixMessage);
         auto end = std::chrono::high_resolution_clock::now();
         auto latency = std::chrono::duration_cast<std::chrono::nanoseconds>(end - start).count();
         latencies_ns.push_back(latency);
-        std::cout << "Response: " << response.dump() << "\n";
+        std::cout << "Response: " << response << "\n";
     }
 
     // Compute average latency

@@ -5,9 +5,6 @@
 #include <unistd.h>
 #include <iostream>
 #include <cstring>
-#include <nlohmann/json.hpp>
-
-using json = nlohmann::json;
 
 Server::Server(int port, Orderbook* orderbook)
     : port_(port), orderbook_(orderbook) {}
@@ -74,17 +71,14 @@ void Server::run() {
 }
 
 void Server::handleClient(int clientSocket) {
-    std::string jsonMsg = receiveMessage(clientSocket);
-    if (jsonMsg.empty()) return;
+    while (true) {
+        std::string fixMessage = receiveMessage(clientSocket);
+        if (fixMessage.empty()) {
+            return;
+        }
 
-    try {
-        json request = json::parse(jsonMsg);
-        json response = orderbook_->processJsonMessage(request);
-        std::cout << "Processed message: " << response << std::endl;
-        sendMessage(clientSocket, response.dump());
-    } catch (const std::exception& e) {
-        std::cerr << "JSON parse error: " << e.what() << std::endl;
-        sendMessage(clientSocket, R"({"error":"Invalid JSON"})");
+        const std::string response = orderbook_->processFixMessage(fixMessage);
+        sendMessage(clientSocket, response);
     }
 }
 

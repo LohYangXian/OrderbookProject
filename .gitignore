@@ -29,7 +29,13 @@ cmake-build-*/
 # Generated files
 *.pyc
 __pycache__/
+
+# Python virtual environments and notebook cache
+.venv/
+venv/
+env/
 py_client/.venv/
+.ipynb_checkpoints/
 
 # External dependencies (managed by Bazel)
 external/
@@ -42,3 +48,8 @@ external/
 # Misc
 *.swp
 *.swo
+
+# Local profiling and benchmark outputs
+perf.data
+perf.data.old
+results/profile_*/

@@ -107,7 +107,6 @@ else
   export PROFILE_NUM_THREADS="${NUM_THREADS}"
   python3 - <<'PY' >"${OUTDIR}/client.log" 2>&1 &
 import os
-import json
 import random
 import socket
 import time
@@ -117,42 +116,55 @@ HOST = "127.0.0.1"
 PORT = 8000
 END_AT = time.time() + float(os.environ.get("PROFILE_DURATION", "15"))
 NUM_THREADS = max(1, int(os.environ.get("PROFILE_NUM_THREADS", "1")))
+PREGEN_BATCH_PER_THREAD = max(1, int(os.environ.get("PROFILE_PREGEN_BATCH_PER_THREAD", "50000")))
 
-def worker(thread_id: int) -> None:
+def generate_requests(thread_id: int, count: int):
+  rng = random.Random(12345 + thread_id)
   next_order_id = thread_id * 1_000_000 + 1
   open_ids = []
+  requests = []
 
-  while time.time() < END_AT:
-    order_type = random.choices(["NEW", "MODIFY", "CANCEL"], weights=[0.75, 0.2, 0.05])[0]
+  for _ in range(count):
+    order_type = rng.choices(["NEW", "MODIFY", "CANCEL"], weights=[0.75, 0.2, 0.05])[0]
+    symbol = rng.choice(["NVDA", "AAPL", "TSLA"])
+    side_tag = "1" if rng.choice(["BUY", "SELL"]) == "BUY" else "2"
+
     if order_type == "NEW" or not open_ids:
-      payload = {
-        "Type": "NEW",
-        "OrderId": next_order_id,
-        "Pair": "BTC/USDT",
-        "Price": str(random.randint(90000, 110000)),
-        "Quantity": str(random.randint(1, 10)),
-        "Side": random.choice(["BUY", "SELL"]),
-      }
+      payload = (
+        f"8=FIX.4.2|35=D|11={next_order_id}|55={symbol}|54={side_tag}|"
+        f"44={rng.randint(90000, 110000)}|38={rng.randint(1, 10)}|"
+      )
       open_ids.append(next_order_id)
       next_order_id += 1
     elif order_type == "MODIFY":
-      oid = random.choice(open_ids)
-      payload = {
-        "Type": "MODIFY",
-        "OrderId": oid,
-        "Pair": "BTC/USDT",
-        "Price": str(random.randint(90000, 110000)),
-        "Quantity": str(random.randint(1, 10)),
-        "Side": random.choice(["BUY", "SELL"]),
-      }
+      oid = rng.choice(open_ids)
+      payload = (
+        f"8=FIX.4.2|35=G|11={oid}|55={symbol}|54={side_tag}|"
+        f"44={rng.randint(90000, 110000)}|38={rng.randint(1, 10)}|"
+      )
     else:
-      oid = random.choice(open_ids)
-      payload = {"Type": "CANCEL", "OrderId": oid}
+      oid = rng.choice(open_ids)
+      payload = f"8=FIX.4.2|35=F|11={oid}|"
       open_ids.remove(oid)
 
-    msg = json.dumps(payload).encode()
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-      s.connect((HOST, PORT))
+    requests.append(payload.encode())
+
+  return requests
+
+thread_requests = [generate_requests(t_id, PREGEN_BATCH_PER_THREAD) for t_id in range(NUM_THREADS)]
+
+def worker(thread_id: int) -> None:
+  requests = thread_requests[thread_id]
+  idx = 0
+
+  with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+    s.connect((HOST, PORT))
+
+    while time.time() < END_AT:
+      msg = requests[idx]
+      idx += 1
+      if idx == len(requests):
+        idx = 0
       s.sendall(msg)
       s.recv(4096)
 

@@ -1,99 +1,195 @@
 #include "Orderbook.h"
 
-//For this our sample structure looks like this:
-//{
-// "Type": "NEW" // or "CANCEL" or "MODIFY",
-// "OrderId": 123456,
-// "Pair": "BTCUSDT",
-// "Price": "10500.00",
-// "Quantity": "0.005",
-// "Side": "BUY"  // or "SELL"
-//}
-// We will parse this JSON and create an Order object
-//TODO: Improve this, refactor, add error handling, logging, etc.
-json Orderbook::processJsonMessage(const json& message)
+#include <charconv>
+#include <string_view>
+#include <system_error>
+
+using namespace std;
+
+namespace FixTag {
+    constexpr const char* BeginString = "8";
+    constexpr const char* MsgType     = "35";
+    constexpr const char* OrderId     = "11";
+    constexpr const char* Symbol      = "55";
+    constexpr const char* Side        = "54";
+    constexpr const char* Price       = "44";
+    constexpr const char* Quantity    = "38";
+}
+
+namespace {
+
+constexpr const char* kOkResponse = "OK";
+constexpr const char* kErrResponse = "ERR";
+constexpr const char* kCreatedPrefix = "ID:";
+
+struct ParsedFixFields {
+    std::string_view msgType;
+    std::string_view orderId;
+    std::string_view symbol;
+    std::string_view side;
+    std::string_view price;
+    std::string_view quantity;
+};
+
+bool parseFixFields(const std::string& message, ParsedFixFields& out)
 {
-    // Step 0: Check for Type field
-    if (!message.contains("Type")) {
-        return json{{"status", "error"}, {"message", "Missing Type field"}};
+    if (message.rfind("8=FIX.4.2|", 0) != 0) {
+        return false;
     }
-    std::string type = message["Type"];
-    if (type == "CANCEL") {
-        if (!message.contains("OrderId")) {
-            return json{{"status", "error"}, {"message", "Missing OrderId for CANCEL"}};
-        }
-        OrderId orderId = static_cast<OrderId>(message["OrderId"]);
-        cancelOrder(orderId);
-        return json{{"status", "success"}, {"message", "Order cancelled"}};
-    } else if (type == "MODIFY") {
-        if (!message.contains("OrderId") || !message.contains("Price") || 
-            !message.contains("Quantity") || !message.contains("Side")
-            || !message.contains("Pair") || message["Pair"] != "BTC/USDT") {
-            return json{{"status", "error"}, {"message", "Invalid MODIFY message format"}};
-        }
-        OrderId orderId = static_cast<OrderId>(message["OrderId"]);
-        Price price = static_cast<Price>(std::stod(message["Price"].get<std::string>()));
-        Quantity qty = static_cast<Quantity>(std::stod(message["Quantity"].get<std::string>()));
-        Side side;
-        if (message["Side"] == "BUY") {
-            side = Side::BUY;
-        } else if (message["Side"] == "SELL") {
-            side = Side::SELL;
-        } else {
-            return json{{"status", "error"}, {"message", "Invalid side value"}};
-        }
-        if (qty <= 0) {
-            return json{{"status", "error"}, {"message", "Quantity cannot be zero or negative"}};
-        }
-        if (price <= 0) {
-            return json{{"status", "error"}, {"message", "Price cannot be zero or negative"}};
+
+    size_t start = 0;
+    while (start < message.size()) {
+        size_t end = message.find('|', start);
+        if (end == std::string::npos) {
+            end = message.size();
         }
 
-        auto trades = modifyOrder(OrderModify{orderId, price, qty, side});
-        if (!trades.empty()) {
-            json tradesJson = json::array();
-            for (const auto& trade : trades) {
-                tradesJson.push_back({
-                    {"bidOrderId", trade.getBidTradeInfo().getOrderId()},
-                    {"price", trade.getBidTradeInfo().getPrice()}, // Use bid price for trade price
-                    {"quantity", trade.getBidTradeInfo().getQuantity()}, // Quantity is the same for both sides
-                    {"askOrderId", trade.getAskTradeInfo().getOrderId()},
-                    {"price", trade.getAskTradeInfo().getPrice()}, // Use ask price for trade price
-                    {"quantity", trade.getAskTradeInfo().getQuantity()} // Quantity is the same for both sides
-                });
+        if (end > start) {
+            size_t sep = message.find('=', start);
+            if (sep != std::string::npos && sep > start && sep < end) {
+                const std::string_view tag(message.data() + start, sep - start);
+                const std::string_view value(message.data() + sep + 1, end - sep - 1);
+
+                if (tag == FixTag::MsgType) {
+                    out.msgType = value;
+                } else if (tag == FixTag::OrderId) {
+                    out.orderId = value;
+                } else if (tag == FixTag::Symbol) {
+                    out.symbol = value;
+                } else if (tag == FixTag::Side) {
+                    out.side = value;
+                } else if (tag == FixTag::Price) {
+                    out.price = value;
+                } else if (tag == FixTag::Quantity) {
+                    out.quantity = value;
+                }
             }
-            return json{{"status", "success"}, {"modified trades executed", tradesJson}};
-        } else {
-            return json{{"status", "success"}, {"message", "Order modified, no trades executed"}};
-        } 
-    } else if (type != "NEW") {
-        return json{{"status", "error"}, {"message", "Invalid Type value"}};
+        }
+
+        start = end + 1;
+    }
+
+    return !out.msgType.empty();
+}
+
+template <typename T>
+bool parseInteger(std::string_view text, T& out)
+{
+    if (text.empty()) {
+        return false;
+    }
+
+    const char* begin = text.data();
+    const char* end = begin + text.size();
+    const auto [ptr, ec] = std::from_chars(begin, end, out);
+    return ec == std::errc() && ptr == end;
+}
+
+bool parseSide(std::string_view field, Side& side)
+{
+    if (field == "1") {
+        side = Side::BUY;
+        return true;
+    }
+    if (field == "2") {
+        side = Side::SELL;
+        return true;
+    }
+    return false;
+}
+
+} // namespace
+
+string Orderbook::processFixMessage(const string& message)
+{
+    ParsedFixFields fields;
+    if (!parseFixFields(message, fields)) {
+        return kErrResponse;
+    }
+
+    // Step 0: Check for Type field
+    // Cancel Type = F, Modify Type = G, New Order Type = D
+    // Verify Cancel and Modify messages have the required fields, then process them accordingly
+    if (fields.msgType == "F") {
+        if (fields.orderId.empty()) {
+            return kErrResponse;
+        }
+
+        OrderId orderId = 0;
+        if (!parseInteger(fields.orderId, orderId)) {
+            return kErrResponse;
+        }
+
+        cancelOrder(orderId);
+        return kOkResponse;
+    } else if (fields.msgType == "G") {
+        if (fields.orderId.empty() || fields.price.empty() || fields.quantity.empty() ||
+            fields.side.empty() || fields.symbol.empty()) {
+            return kErrResponse;
+        }
+
+        OrderId orderId = 0;
+        Price price = 0;
+        Quantity qty = 0;
+        if (!parseInteger(fields.orderId, orderId) ||
+            !parseInteger(fields.price, price) ||
+            !parseInteger(fields.quantity, qty)) {
+            return kErrResponse;
+        }
+
+        Side side;
+        if (!parseSide(fields.side, side)) {
+            return kErrResponse;
+        }
+
+        Symbol symbol(fields.symbol);
+        if (qty <= 0) {
+            return kErrResponse;
+        }
+        if (price <= 0) {
+            return kErrResponse;
+        }
+
+        modifyOrder(OrderModify{orderId, price, qty, side, symbol});
+        return kOkResponse;
+    } else if (fields.msgType != "D") {
+        return kErrResponse;
     } 
 
     // Step 1: Validate the message structure
-    if (!message.contains("OrderId") || !message.contains("Pair") || !message.contains("Price") || 
-        !message.contains("Quantity") || !message.contains("Side")
-        || message["Pair"] != "BTC/USDT") {
-        return json{{"status", "error"}, {"message", "Invalid message format"}};
+    if (fields.orderId.empty() || fields.symbol.empty() || fields.price.empty() ||
+        fields.quantity.empty() || fields.side.empty()) {
+        return kErrResponse;
     }
 
     // Step 2: Parse the message
-    OrderId orderId = static_cast<OrderId>(message["OrderId"]);
-    Price price = static_cast<Price>(std::stod(message["Price"].get<std::string>()));
-    Quantity qty = static_cast<Quantity>(std::stod(message["Quantity"].get<std::string>()));
-    Side side;
-    if (message["Side"] == "BUY") {
-        side = Side::BUY;
-    } else if (message["Side"] == "SELL") {
-        side = Side::SELL;
-    } else {
-        return json{{"status", "error"}, {"message", "Invalid side value"}};
+    OrderId orderId = 0;
+    Price price = 0;
+    Quantity qty = 0;
+    if (!parseInteger(fields.orderId, orderId) ||
+        !parseInteger(fields.price, price) ||
+        !parseInteger(fields.quantity, qty)) {
+        return kErrResponse;
     }
+
+    Side side;
+    if (!parseSide(fields.side, side)) {
+        return kErrResponse;
+    }
+
+    Symbol symbol(fields.symbol);
     if (qty <= 0) {
-        return json{{"status", "error"}, {"message", "Quantity cannot be zero or negative"}};
+        return kErrResponse;
     }
     if (price <= 0) {
-        return json{{"status", "error"}, {"message", "Price cannot be zero or negative"}};
+        return kErrResponse;
+    }
+
+    {
+        std::scoped_lock lock(ordersMutex_);
+        if (orderToBook_.find(orderId) != orderToBook_.end()) {
+            return kErrResponse;
+        }
     }
 
     // Step 3: Create and add the order
@@ -102,196 +198,192 @@ json Orderbook::processJsonMessage(const json& message)
             orderId,
             price,
             qty,
-            side
+            side,
+            symbol
         )
     );
     
-    auto trades = addOrder(order);
-    if (!trades.empty()) {
-        json tradesJson = json::array();
-        for (const auto& trade : trades) {
-            tradesJson.push_back({
-                {"bidOrderId", trade.getBidTradeInfo().getOrderId()},
-                {"price", trade.getBidTradeInfo().getPrice()}, // Use bid price for trade price
-                {"quantity", trade.getBidTradeInfo().getQuantity()}, // Quantity is the same for both sides
-                {"askOrderId", trade.getAskTradeInfo().getOrderId()},
-                {"price", trade.getAskTradeInfo().getPrice()}, // Use ask price for trade price
-                {"quantity", trade.getAskTradeInfo().getQuantity()} // Quantity is the same for both sides
-            });
-        }
-        return json{{"status", "success"}, {"trades", tradesJson}};
-    } else {
-        return json{{"status", "success"}, {"message", "Order added, no trades executed"}};
-    } 
+    addOrder(order);
+    return std::string(kCreatedPrefix) + std::to_string(orderId);
 }
 
-void Orderbook::processBinanceMessage(const std::string& message)
-{
-    json j = json::parse(message);
 
-    // Update bids
-    for (const auto& bid : j["b"]) {
-        Price price = static_cast<Price>(std::stod(bid[0].get<std::string>()) * 100);
-        Quantity qty = static_cast<Quantity>(std::stod(bid[1].get<std::string>()) * 1000);
-        if (qty == 0) {
-            bids_.erase(price);
-        } else {
-            // Replace aggregate at price with a single synthetic order
-            bids_[price].clear();
-            bids_[price].push_back(std::make_shared<Order>(0, price, qty, Side::BUY));
-        }
-    }
-
-    // Update asks
-    for (const auto& ask : j["a"]) {
-        Price price = static_cast<Price>(std::stod(ask[0].get<std::string>()) * 100);
-        Quantity qty = static_cast<Quantity>(std::stod(ask[1].get<std::string>()) * 1000);
-        if (qty == 0) {
-            asks_.erase(price);
-        } else {
-            asks_[price].clear();
-            asks_[price].push_back(std::make_shared<Order>(0, price, qty, Side::SELL));
-        }
-    }
-};
 
 Trades Orderbook::addOrder(const OrderPointer& order)
 {
+    if (!order || order->getSymbol().empty()) {
+        return { };
+    }
 
     std::scoped_lock lock(ordersMutex_);
 
-    if (orders_.contains(order->getOrderId())) {
-        return { }; // Duplicate order ID
+    if (orderToBook_.find(order->getOrderId()) != orderToBook_.end()) {
+        return { };
     }
 
+    auto& book = books_[order->getSymbol()];
     OrderPointers::iterator iterator;
 
     if (order->getSide() == Side::BUY) {
-        auto& orders = bids_[order->getPrice()];
+        auto& orders = book.bids_[order->getPrice()];
         orders.push_back(order);
         iterator = std::prev(orders.end());
     } else {
-        auto& orders = asks_[order->getPrice()];
+        auto& orders = book.asks_[order->getPrice()];
         orders.push_back(order);
         iterator = std::prev(orders.end());
     }
 
-    orders_.insert({order->getOrderId(), OrderEntry{order, iterator}});
+    book.orders_.insert({order->getOrderId(), OrderEntry{order, iterator}});
+    orderToBook_.insert({order->getOrderId(), &book});
 
-    return matchOrders();
-};
-
+    return matchOrders(book);
+}
 
 void Orderbook::cancelOrder(OrderId orderId)
 {
-
     std::scoped_lock lock(ordersMutex_);
 
-    if (!orders_.contains(orderId)) {
-        return; // Order not found
+    auto bookPtrIt = orderToBook_.find(orderId);
+    if (bookPtrIt == orderToBook_.end() || bookPtrIt->second == nullptr) {
+        return;
     }
 
-    const auto [order, iterator] = orders_[orderId];
-    orders_.erase(orderId);
+    auto& book = *bookPtrIt->second;
+
+    auto orderIt = book.orders_.find(orderId);
+    if (orderIt == book.orders_.end()) {
+        orderToBook_.erase(bookPtrIt);
+        return;
+    }
+
+    const auto [order, iterator] = orderIt->second;
+    book.orders_.erase(orderIt);
+    orderToBook_.erase(bookPtrIt);
 
     if (order->getSide() == Side::BUY) {
         auto price = order->getPrice();
-        auto& orders = bids_.at(price);
+        auto& orders = book.bids_.at(price);
         orders.erase(iterator);
         if (orders.empty()) {
-            bids_.erase(price);
+            book.bids_.erase(price);
         }
     } else {
         auto price = order->getPrice();
-        auto& orders = asks_.at(price);
+        auto& orders = book.asks_.at(price);
         orders.erase(iterator);
         if (orders.empty()) {
-            asks_.erase(price);
+            book.asks_.erase(price);
         }
     }
-};
+}
 
 Trades Orderbook::modifyOrder(OrderModify order)
 {
+    SymbolBook* book = nullptr;
+    Symbol existingSymbol;
     {
         std::scoped_lock lock(ordersMutex_);
-        if (!orders_.contains(order.getOrderId())) {
-            return { }; // Order not found
+        auto bookPtrIt = orderToBook_.find(order.getOrderId());
+        if (bookPtrIt == orderToBook_.end() || bookPtrIt->second == nullptr) {
+            return { };
         }
+
+        book = bookPtrIt->second;
+        auto orderIt = book->orders_.find(order.getOrderId());
+        if (orderIt == book->orders_.end()) {
+            orderToBook_.erase(bookPtrIt);
+            return { };
+        }
+        existingSymbol = orderIt->second.order_->getSymbol();
+    }
+
+    // Keep modification symbol-scoped to avoid moving an order across books implicitly.
+    if (existingSymbol != order.getSymbol()) {
+        return { };
     }
 
     cancelOrder(order.getOrderId());
     return addOrder(order.toOrderPointer());
 }
 
-Trades Orderbook::matchOrders() {
+Trades Orderbook::matchOrders(SymbolBook& book)
+{
     Trades trades;
-    trades.reserve(bids_.size() + asks_.size()); // Rough estimate
+    trades.reserve(book.bids_.size() + book.asks_.size());
 
-    while (!bids_.empty() && !asks_.empty()) {
-        auto bestBidIt = bids_.begin();
-        auto bestAskIt = asks_.begin();
+    while (!book.bids_.empty() && !book.asks_.empty()) {
+        auto bestBidIt = book.bids_.begin();
+        auto bestAskIt = book.asks_.begin();
 
         Price bestBidPrice = bestBidIt->first;
         Price bestAskPrice = bestAskIt->first;
 
-        if (bestBidPrice >= bestAskPrice) {
-            auto& bidQueue = bestBidIt->second;
-            auto& askQueue = bestAskIt->second;
+        if (bestBidPrice < bestAskPrice) {
+            break;
+        }
 
-            auto bidOrder = bidQueue.front();
-            auto askOrder = askQueue.front();
+        auto& bidQueue = bestBidIt->second;
+        auto& askQueue = bestAskIt->second;
 
-            Quantity tradeQty = std::min(bidOrder->getUnfilledQuantity(), askOrder->getUnfilledQuantity());
+        auto bidOrder = bidQueue.front();
+        auto askOrder = askQueue.front();
 
-            bidOrder->fill(tradeQty);
-            askOrder->fill(tradeQty);
+        Quantity tradeQty = std::min(bidOrder->getUnfilledQuantity(), askOrder->getUnfilledQuantity());
 
-            // Log the trade
-            trades.push_back(Trade{TradeInfo{bestBidPrice, tradeQty, bidOrder->getOrderId()},
-                    TradeInfo{bestAskPrice, tradeQty, askOrder->getOrderId()}});
+        bidOrder->fill(tradeQty);
+        askOrder->fill(tradeQty);
 
-            if (bidOrder->isFilled()) {
-                bidQueue.pop_front();
-                orders_.erase(bidOrder->getOrderId());
-            }
+        trades.push_back(Trade{
+            TradeInfo{bestBidPrice, tradeQty, bidOrder->getOrderId(), bidOrder->getSymbol()},
+            TradeInfo{bestAskPrice, tradeQty, askOrder->getOrderId(), askOrder->getSymbol()}
+        });
 
-            if (askOrder->isFilled()) {
-                askQueue.pop_front();
-                orders_.erase(askOrder->getOrderId());
-            }
+        if (bidOrder->isFilled()) {
+            bidQueue.pop_front();
+            book.orders_.erase(bidOrder->getOrderId());
+            orderToBook_.erase(bidOrder->getOrderId());
+        }
 
-            if (bidQueue.empty()) {
-                bids_.erase(bestBidIt);
-            }
-            if (askQueue.empty()) {
-                asks_.erase(bestAskIt);
-            }
-        } else {
-            break; // No more matches possible
+        if (askOrder->isFilled()) {
+            askQueue.pop_front();
+            book.orders_.erase(askOrder->getOrderId());
+            orderToBook_.erase(askOrder->getOrderId());
+        }
+
+        if (bidQueue.empty()) {
+            book.bids_.erase(bestBidIt);
+        }
+        if (askQueue.empty()) {
+            book.asks_.erase(bestAskIt);
         }
     }
+
     return trades;
-};
+}
 
 void Orderbook::printOrderBook() const
 {
     std::cout << "Order Book:\n";
-    std::cout << "Bids:\n";
-    for (const auto& [price, orders] : bids_) {
-        Quantity totalQty = 0;
-        for (const auto& order : orders) {
-            totalQty += order->getUnfilledQuantity();
-        }
-        std::cout << "Price: $" << price << ", Total Quantity: " << totalQty << "\n";
-    }
 
-    std::cout << "Asks:\n";
-    for (const auto& [price, orders] : asks_) {
-        Quantity totalQty = 0;
-        for (const auto& order : orders) {
-            totalQty += order->getUnfilledQuantity();
+    for (const auto& [symbol, book] : books_) {
+        std::cout << "Symbol: " << symbol << "\n";
+        std::cout << "Bids:\n";
+        for (const auto& [price, orders] : book.bids_) {
+            Quantity totalQty = 0;
+            for (const auto& order : orders) {
+                totalQty += order->getUnfilledQuantity();
+            }
+            std::cout << "Price: $" << price << ", Total Quantity: " << totalQty << "\n";
         }
-        std::cout << "Price: $" << price << ", Total Quantity: " << totalQty << "\n";
+
+        std::cout << "Asks:\n";
+        for (const auto& [price, orders] : book.asks_) {
+            Quantity totalQty = 0;
+            for (const auto& order : orders) {
+                totalQty += order->getUnfilledQuantity();
+            }
+            std::cout << "Price: $" << price << ", Total Quantity: " << totalQty << "\n";
+        }
     }
 }

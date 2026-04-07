@@ -3,6 +3,8 @@
 #include <map>
 #include <iostream>
 #include <mutex>
+#include <string>
+#include <unordered_map>
 
 #include "Usings.h"
 #include "Side.h"
@@ -20,12 +22,17 @@ private:
         OrderPointers::iterator location_;
     };
 
-    std::map<Price, OrderPointers, std::greater<Price>> bids_; // Price -> Queue of Orders
-    std::map<Price, OrderPointers, std::less<Price>> asks_; // Price -> Queue of Orders
-    std::unordered_map<OrderId, OrderEntry> orders_; // OrderId -> OrderEntry for quick lookup, this is to support cancel/modify
+    struct SymbolBook {
+        std::map<Price, OrderPointers, std::greater<Price>> bids_;
+        std::map<Price, OrderPointers, std::less<Price>> asks_;
+        std::unordered_map<OrderId, OrderEntry> orders_;
+    };
+
+    std::unordered_map<Symbol, SymbolBook> books_; // Symbol -> independent order book
+    std::unordered_map<OrderId, SymbolBook*> orderToBook_; // OrderId -> owning symbol book
     mutable std::mutex ordersMutex_;
 
-    Trades matchOrders();
+    Trades matchOrders(SymbolBook& book);
 
 public:
 
@@ -33,10 +40,8 @@ public:
     // that inherits from OrderBook and implements processMessage
     void processBinanceMessage(const std::string& message);
     
-    // This will be our v0 generic message processor
-    // We will use a server to receive messages and call this function
-    // then we will test the performance of this function
-    json processJsonMessage(const json& message);
+    // Process simplified FIX messages (tag=value|tag=value|...)
+    std::string processFixMessage(const std::string& message);
 
     Trades addOrder(const OrderPointer& order);
    
@@ -46,7 +51,7 @@ public:
     void printOrderBook() const;
 
     // For testing purposes
-    const auto& getBids() const { return bids_; }
-    const auto& getAsks() const { return asks_; }
+    const auto& getBids(const Symbol& symbol) const { return books_.at(symbol).bids_; }
+    const auto& getAsks(const Symbol& symbol) const { return books_.at(symbol).asks_; }
 };
 
