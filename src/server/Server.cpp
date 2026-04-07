@@ -5,9 +5,51 @@
 #include <unistd.h>
 #include <iostream>
 #include <cstring>
+#include <sstream>
+#include <unordered_map>
 #include <nlohmann/json.hpp>
 
 using json = nlohmann::json;
+
+// Detect whether a raw message is a FIX-style pipe-delimited string
+// (e.g. ts=1000|client=1|cmd=N|id=1001|sym=AAPL|side=B|px=15025|qty=200)
+// rather than a JSON object (which always starts with '{').
+static bool isFixMessage(const std::string& msg) {
+    return !msg.empty() && msg[0] != '{';
+}
+
+// Convert a FIX-style pipe-delimited message into the JSON object expected by
+// Orderbook::processJsonMessage().  Field mapping:
+//   cmd  : N -> NEW, M -> MODIFY, C -> CANCEL  (-> "Type")
+//   id   : order id                             (-> "OrderId", numeric)
+//   sym  : instrument symbol                    (-> "Pair")
+//   side : B -> BUY, S -> SELL                  (-> "Side")
+//   px   : price                                (-> "Price", string)
+//   qty  : quantity                             (-> "Quantity", string)
+//   ts, client are accepted but not forwarded.
+static json fixToJson(const std::string& msg) {
+    std::unordered_map<std::string, std::string> fields;
+    std::istringstream ss(msg);
+    std::string token;
+    while (std::getline(ss, token, '|')) {
+        auto pos = token.find('=');
+        if (pos != std::string::npos)
+            fields[token.substr(0, pos)] = token.substr(pos + 1);
+    }
+
+    json result;
+    const std::string& cmd = fields["cmd"];
+    if      (cmd == "N") result["Type"] = "NEW";
+    else if (cmd == "C") result["Type"] = "CANCEL";
+    else if (cmd == "M") result["Type"] = "MODIFY";
+
+    if (fields.count("id"))   result["OrderId"]  = std::stoull(fields.at("id"));
+    if (fields.count("sym"))  result["Pair"]      = fields.at("sym");
+    if (fields.count("side")) result["Side"]      = (fields.at("side") == "B") ? "BUY" : "SELL";
+    if (fields.count("px"))   result["Price"]     = fields.at("px");
+    if (fields.count("qty"))  result["Quantity"]  = fields.at("qty");
+    return result;
+}
 
 Server::Server(int port, Orderbook* orderbook)
     : port_(port), orderbook_(orderbook) {}
@@ -74,17 +116,17 @@ void Server::run() {
 }
 
 void Server::handleClient(int clientSocket) {
-    std::string jsonMsg = receiveMessage(clientSocket);
-    if (jsonMsg.empty()) return;
+    std::string msg = receiveMessage(clientSocket);
+    if (msg.empty()) return;
 
     try {
-        json request = json::parse(jsonMsg);
+        json request = isFixMessage(msg) ? fixToJson(msg) : json::parse(msg);
         json response = orderbook_->processJsonMessage(request);
         std::cout << "Processed message: " << response << std::endl;
         sendMessage(clientSocket, response.dump());
     } catch (const std::exception& e) {
-        std::cerr << "JSON parse error: " << e.what() << std::endl;
-        sendMessage(clientSocket, R"({"error":"Invalid JSON"})");
+        std::cerr << "Parse error: " << e.what() << std::endl;
+        sendMessage(clientSocket, R"({"error":"Invalid message"})");
     }
 }
 
