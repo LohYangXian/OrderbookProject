@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <map>
 #include <iostream>
 #include <mutex>
@@ -12,29 +13,47 @@
 #include "TradeInfo.h"
 #include "Trade.h"
 #include "OrderModify.h"
+#include "OrderPool.h"
 
 class Orderbook 
 {
 private:
+    static constexpr std::size_t kPreallocatedOrderCapacity = 5'000'000;
+    static constexpr std::size_t kKnownSymbolCount = static_cast<std::size_t>(SymbolId::Unknown);
 
-    struct OrderEntry {
-        OrderPointer order_{ nullptr };
-        OrderPointers::iterator location_;
-    };
+    OrderPool orderPool_;
 
     struct SymbolBook {
         std::map<Price, OrderPointers, std::greater<Price>> bids_;
         std::map<Price, OrderPointers, std::less<Price>> asks_;
-        std::unordered_map<OrderId, OrderEntry> orders_;
     };
 
-    std::unordered_map<Symbol, SymbolBook> books_; // Symbol -> independent order book
-    std::unordered_map<OrderId, SymbolBook*> orderToBook_; // OrderId -> owning symbol book
+    struct OrderLocator {
+        OrderPointer order_{ nullptr };
+        OrderPointers::iterator location_;
+        SymbolBook* book_{ nullptr };
+    };
+
+    std::array<SymbolBook, kKnownSymbolCount> books_;
+    std::vector<OrderLocator> orderLocators_;
+    std::unordered_map<OrderId, OrderLocator> overflowOrderLocators_;
     mutable std::mutex ordersMutex_;
 
+    static bool isKnownSymbol(SymbolId symbolId);
+    SymbolBook& symbolBook(SymbolId symbolId);
+    const SymbolBook& symbolBook(SymbolId symbolId) const;
+
+    bool hasOrderLocatorUnlocked(OrderId orderId) const;
+    OrderLocator* getOrderLocatorUnlocked(OrderId orderId);
+    const OrderLocator* getOrderLocatorUnlocked(OrderId orderId) const;
+    void upsertOrderLocatorUnlocked(OrderId orderId, OrderLocator locator);
+    void eraseOrderLocatorUnlocked(OrderId orderId);
+
+    OrderPointer makePooledOrder(OrderId orderId, Price price, Quantity quantity, Side side, SymbolId symbolId);
     Trades matchOrders(SymbolBook& book);
 
 public:
+    Orderbook();
 
     // For this specific Binance code, we should refactor it into a separate binance order book class
     // that inherits from OrderBook and implements processMessage
@@ -51,7 +70,7 @@ public:
     void printOrderBook() const;
 
     // For testing purposes
-    const auto& getBids(const Symbol& symbol) const { return books_.at(symbol).bids_; }
-    const auto& getAsks(const Symbol& symbol) const { return books_.at(symbol).asks_; }
+    const auto& getBids(SymbolId symbolId) const { return symbolBook(symbolId).bids_; }
+    const auto& getAsks(SymbolId symbolId) const { return symbolBook(symbolId).asks_; }
 };
 

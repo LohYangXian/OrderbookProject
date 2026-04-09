@@ -52,7 +52,7 @@ with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
 
     for order_type, msg in requests:
         t0 = time.time_ns()
-        s.sendall(msg)
+        s.sendall(msg + b"\n")
         response = s.recv(4096)
         t1 = time.time_ns()
         rtt_us = (t1 - t0) // 1000

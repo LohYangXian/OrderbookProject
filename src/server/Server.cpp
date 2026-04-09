@@ -2,9 +2,12 @@
 
 #include <sys/socket.h>
 #include <netinet/in.h>
+#include <netinet/tcp.h>
 #include <unistd.h>
 #include <iostream>
 #include <cstring>
+#include <thread>
+#include <string_view>
 
 Server::Server(int port, Orderbook* orderbook)
     : port_(port), orderbook_(orderbook) {}
@@ -49,7 +52,7 @@ void Server::run() {
         return;
     }
 
-    if (listen(server_fd, 5) < 0) {
+    if (listen(server_fd, 128) < 0) {
         std::cerr << "Listen failed\n";
         close(server_fd);
         return;
@@ -63,33 +66,80 @@ void Server::run() {
             std::cerr << "Accept failed\n";
             continue;
         }
-        handleClient(client_fd);
-        close(client_fd);
+
+        // Low-latency responses for small FIX messages.
+        int nodelay = 1;
+        if (setsockopt(client_fd, IPPROTO_TCP, TCP_NODELAY, &nodelay, sizeof(nodelay)) < 0) {
+            std::cerr << "setsockopt(TCP_NODELAY) failed\n";
+            close(client_fd);
+            continue;
+        }
+
+        std::thread(&Server::handleClient, this, client_fd).detach();
     }
 
     close(server_fd);
 }
 
 void Server::handleClient(int clientSocket) {
+    constexpr std::size_t kReadBufferSize = 64 * 1024;
+    constexpr std::size_t kMaxFrameBytes = 4 * 1024;
+
+    char readBuffer[kReadBufferSize];
+    std::string receiveBuffer;
+    std::string sendBuffer;
+    receiveBuffer.reserve(kReadBufferSize);
+    sendBuffer.reserve(kReadBufferSize);
+
     while (true) {
-        std::string fixMessage = receiveMessage(clientSocket);
-        if (fixMessage.empty()) {
+        const ssize_t bytesRead = recv(clientSocket, readBuffer, sizeof(readBuffer), 0);
+        if (bytesRead <= 0) {
+            close(clientSocket);
             return;
         }
 
-        const std::string response = orderbook_->processFixMessage(fixMessage);
-        sendMessage(clientSocket, response);
+        receiveBuffer.append(readBuffer, static_cast<std::size_t>(bytesRead));
+
+        std::size_t frameEnd = receiveBuffer.find('\n');
+        while (frameEnd != std::string::npos) {
+            std::string_view frame(receiveBuffer.data(), frameEnd);
+            if (!frame.empty() && frame.back() == '\r') {
+                frame.remove_suffix(1);
+            }
+
+            if (!frame.empty()) {
+                const std::string response = orderbook_->processFixMessage(std::string(frame));
+                sendBuffer.append(response);
+                sendBuffer.push_back('\n');
+            }
+
+            receiveBuffer.erase(0, frameEnd + 1);
+            frameEnd = receiveBuffer.find('\n');
+        }
+
+        if (!sendBuffer.empty()) {
+            sendMessage(clientSocket, sendBuffer);
+            sendBuffer.clear();
+        }
+
+        if (receiveBuffer.size() > kMaxFrameBytes) {
+            close(clientSocket);
+            return;
+        }
     }
 }
 
-std::string Server::receiveMessage(int clientSocket) {
-    char buffer[4096];
-    ssize_t bytesRead = recv(clientSocket, buffer, sizeof(buffer) - 1, 0);
-    if (bytesRead <= 0) return "";
-    buffer[bytesRead] = '\0';
-    return std::string(buffer);
-}
-
-void Server::sendMessage(int clientSocket, const std::string& message) {
-    send(clientSocket, message.c_str(), message.size(), 0);
+void Server::sendMessage(int clientSocket, std::string_view message) {
+    const char* data = message.data();
+    size_t totalSent = 0;
+    while (totalSent < message.size()) {
+        const ssize_t sent = send(clientSocket,
+                                  data + totalSent,
+                                  message.size() - totalSent,
+                                  MSG_NOSIGNAL);
+        if (sent <= 0) {
+            return;
+        }
+        totalSent += static_cast<size_t>(sent);
+    }
 }

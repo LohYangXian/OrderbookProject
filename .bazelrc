@@ -1,0 +1,16 @@
+# Repo-local Bazel build presets.
+# Usage:
+#   bazel build --config=fast //src:main_server
+#   bazel build --config=perf //src:main_server
+
+build:fast --compilation_mode=opt
+build:fast --copt=-O3
+build:fast --copt=-march=native
+build:fast --copt=-mtune=native
+build:fast --copt=-DNDEBUG
+build:fast --linkopt=-Wl,-O2
+
+build:perf --compilation_mode=opt
+build:perf --strip=never
+build:perf --copt=-g
+build:perf --copt=-fno-omit-frame-pointer

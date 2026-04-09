@@ -1,6 +1,7 @@
 #include "Orderbook.h"
 
 #include <charconv>
+#include <stdexcept>
 #include <string_view>
 #include <system_error>
 
@@ -21,6 +22,7 @@ namespace {
 constexpr const char* kOkResponse = "OK";
 constexpr const char* kErrResponse = "ERR";
 constexpr const char* kCreatedPrefix = "ID:";
+constexpr std::size_t kOrderPoolChunkSize = 4096;
 
 struct ParsedFixFields {
     std::string_view msgType;
@@ -98,7 +100,111 @@ bool parseSide(std::string_view field, Side& side)
     return false;
 }
 
+bool parseSymbolId(std::string_view field, SymbolId& symbolId)
+{
+    symbolId = toSymbolId(field);
+    return symbolId != SymbolId::Unknown;
+}
+
 } // namespace
+
+Orderbook::Orderbook()
+    : orderPool_(kOrderPoolChunkSize)
+{
+    orderPool_.preallocate(kPreallocatedOrderCapacity);
+    orderLocators_.resize(kPreallocatedOrderCapacity + 1);
+    overflowOrderLocators_.reserve(4096);
+}
+
+bool Orderbook::isKnownSymbol(SymbolId symbolId)
+{
+    return symbolId != SymbolId::Unknown;
+}
+
+Orderbook::SymbolBook& Orderbook::symbolBook(SymbolId symbolId)
+{
+    if (!isKnownSymbol(symbolId)) {
+        throw std::out_of_range("Unknown symbol");
+    }
+    return books_[static_cast<std::size_t>(symbolId)];
+}
+
+const Orderbook::SymbolBook& Orderbook::symbolBook(SymbolId symbolId) const
+{
+    if (!isKnownSymbol(symbolId)) {
+        throw std::out_of_range("Unknown symbol");
+    }
+    return books_[static_cast<std::size_t>(symbolId)];
+}
+
+bool Orderbook::hasOrderLocatorUnlocked(OrderId orderId) const
+{
+    if (orderId < orderLocators_.size()) {
+        return orderLocators_[orderId].book_ != nullptr;
+    }
+    return overflowOrderLocators_.find(orderId) != overflowOrderLocators_.end();
+}
+
+Orderbook::OrderLocator* Orderbook::getOrderLocatorUnlocked(OrderId orderId)
+{
+    if (orderId < orderLocators_.size()) {
+        auto& locator = orderLocators_[orderId];
+        if (locator.book_ == nullptr) {
+            return nullptr;
+        }
+        return &locator;
+    }
+
+    auto it = overflowOrderLocators_.find(orderId);
+    if (it == overflowOrderLocators_.end()) {
+        return nullptr;
+    }
+    return &it->second;
+}
+
+const Orderbook::OrderLocator* Orderbook::getOrderLocatorUnlocked(OrderId orderId) const
+{
+    if (orderId < orderLocators_.size()) {
+        const auto& locator = orderLocators_[orderId];
+        if (locator.book_ == nullptr) {
+            return nullptr;
+        }
+        return &locator;
+    }
+
+    auto it = overflowOrderLocators_.find(orderId);
+    if (it == overflowOrderLocators_.end()) {
+        return nullptr;
+    }
+    return &it->second;
+}
+
+void Orderbook::upsertOrderLocatorUnlocked(OrderId orderId, OrderLocator locator)
+{
+    if (orderId < orderLocators_.size()) {
+        orderLocators_[orderId] = std::move(locator);
+        return;
+    }
+
+    overflowOrderLocators_.insert_or_assign(orderId, std::move(locator));
+}
+
+void Orderbook::eraseOrderLocatorUnlocked(OrderId orderId)
+{
+    if (orderId < orderLocators_.size()) {
+        orderLocators_[orderId] = OrderLocator{};
+        return;
+    }
+    overflowOrderLocators_.erase(orderId);
+}
+
+OrderPointer Orderbook::makePooledOrder(OrderId orderId, Price price, Quantity quantity, Side side, SymbolId symbolId)
+{
+    Order* raw = orderPool_.allocate(orderId, price, quantity, side, symbolId);
+    return OrderPointer(raw, [this](Order* ptr) {
+        orderPool_.deallocate(ptr);
+    });
+}
 
 string Orderbook::processFixMessage(const string& message)
 {
@@ -142,7 +248,10 @@ string Orderbook::processFixMessage(const string& message)
             return kErrResponse;
         }
 
-        Symbol symbol(fields.symbol);
+        SymbolId symbolId = SymbolId::Unknown;
+        if (!parseSymbolId(fields.symbol, symbolId)) {
+            return kErrResponse;
+        }
         if (qty <= 0) {
             return kErrResponse;
         }
@@ -150,7 +259,7 @@ string Orderbook::processFixMessage(const string& message)
             return kErrResponse;
         }
 
-        modifyOrder(OrderModify{orderId, price, qty, side, symbol});
+        modifyOrder(OrderModify{orderId, price, qty, side, symbolId});
         return kOkResponse;
     } else if (fields.msgType != "D") {
         return kErrResponse;
@@ -177,7 +286,10 @@ string Orderbook::processFixMessage(const string& message)
         return kErrResponse;
     }
 
-    Symbol symbol(fields.symbol);
+    SymbolId symbolId = SymbolId::Unknown;
+    if (!parseSymbolId(fields.symbol, symbolId)) {
+        return kErrResponse;
+    }
     if (qty <= 0) {
         return kErrResponse;
     }
@@ -187,21 +299,13 @@ string Orderbook::processFixMessage(const string& message)
 
     {
         std::scoped_lock lock(ordersMutex_);
-        if (orderToBook_.find(orderId) != orderToBook_.end()) {
+        if (hasOrderLocatorUnlocked(orderId)) {
             return kErrResponse;
         }
     }
 
     // Step 3: Create and add the order
-    auto order = std::make_shared<Order>(
-        Order(
-            orderId,
-            price,
-            qty,
-            side,
-            symbol
-        )
-    );
+    auto order = makePooledOrder(orderId, price, qty, side, symbolId);
     
     addOrder(order);
     return std::string(kCreatedPrefix) + std::to_string(orderId);
@@ -211,17 +315,21 @@ string Orderbook::processFixMessage(const string& message)
 
 Trades Orderbook::addOrder(const OrderPointer& order)
 {
-    if (!order || order->getSymbol().empty()) {
+    if (!order) {
+        return { };
+    }
+
+    if (!isKnownSymbol(order->getSymbolId())) {
         return { };
     }
 
     std::scoped_lock lock(ordersMutex_);
 
-    if (orderToBook_.find(order->getOrderId()) != orderToBook_.end()) {
+    if (hasOrderLocatorUnlocked(order->getOrderId())) {
         return { };
     }
 
-    auto& book = books_[order->getSymbol()];
+    auto& book = symbolBook(order->getSymbolId());
     OrderPointers::iterator iterator;
 
     if (order->getSide() == Side::BUY) {
@@ -234,8 +342,7 @@ Trades Orderbook::addOrder(const OrderPointer& order)
         iterator = std::prev(orders.end());
     }
 
-    book.orders_.insert({order->getOrderId(), OrderEntry{order, iterator}});
-    orderToBook_.insert({order->getOrderId(), &book});
+    upsertOrderLocatorUnlocked(order->getOrderId(), OrderLocator{order, iterator, &book});
 
     return matchOrders(book);
 }
@@ -244,22 +351,15 @@ void Orderbook::cancelOrder(OrderId orderId)
 {
     std::scoped_lock lock(ordersMutex_);
 
-    auto bookPtrIt = orderToBook_.find(orderId);
-    if (bookPtrIt == orderToBook_.end() || bookPtrIt->second == nullptr) {
+    OrderLocator* locator = getOrderLocatorUnlocked(orderId);
+    if (locator == nullptr || locator->book_ == nullptr) {
         return;
     }
 
-    auto& book = *bookPtrIt->second;
-
-    auto orderIt = book.orders_.find(orderId);
-    if (orderIt == book.orders_.end()) {
-        orderToBook_.erase(bookPtrIt);
-        return;
-    }
-
-    const auto [order, iterator] = orderIt->second;
-    book.orders_.erase(orderIt);
-    orderToBook_.erase(bookPtrIt);
+    auto& book = *locator->book_;
+    const auto order = locator->order_;
+    const auto iterator = locator->location_;
+    eraseOrderLocatorUnlocked(orderId);
 
     if (order->getSide() == Side::BUY) {
         auto price = order->getPrice();
@@ -280,31 +380,29 @@ void Orderbook::cancelOrder(OrderId orderId)
 
 Trades Orderbook::modifyOrder(OrderModify order)
 {
-    SymbolBook* book = nullptr;
-    Symbol existingSymbol;
+    const OrderLocator* locator = nullptr;
+    SymbolId existingSymbolId = SymbolId::Unknown;
     {
         std::scoped_lock lock(ordersMutex_);
-        auto bookPtrIt = orderToBook_.find(order.getOrderId());
-        if (bookPtrIt == orderToBook_.end() || bookPtrIt->second == nullptr) {
+        locator = getOrderLocatorUnlocked(order.getOrderId());
+        if (locator == nullptr || locator->order_ == nullptr) {
             return { };
         }
-
-        book = bookPtrIt->second;
-        auto orderIt = book->orders_.find(order.getOrderId());
-        if (orderIt == book->orders_.end()) {
-            orderToBook_.erase(bookPtrIt);
-            return { };
-        }
-        existingSymbol = orderIt->second.order_->getSymbol();
+        existingSymbolId = locator->order_->getSymbolId();
     }
 
     // Keep modification symbol-scoped to avoid moving an order across books implicitly.
-    if (existingSymbol != order.getSymbol()) {
+    if (existingSymbolId != order.getSymbolId()) {
         return { };
     }
 
     cancelOrder(order.getOrderId());
-    return addOrder(order.toOrderPointer());
+    return addOrder(makePooledOrder(
+        order.getOrderId(),
+        order.getPrice(),
+        order.getQuantity(),
+        order.getSide(),
+        order.getSymbolId()));
 }
 
 Trades Orderbook::matchOrders(SymbolBook& book)
@@ -335,20 +433,18 @@ Trades Orderbook::matchOrders(SymbolBook& book)
         askOrder->fill(tradeQty);
 
         trades.push_back(Trade{
-            TradeInfo{bestBidPrice, tradeQty, bidOrder->getOrderId(), bidOrder->getSymbol()},
-            TradeInfo{bestAskPrice, tradeQty, askOrder->getOrderId(), askOrder->getSymbol()}
+            TradeInfo{bestBidPrice, tradeQty, bidOrder->getOrderId(), Symbol(toSymbolString(bidOrder->getSymbolId()))},
+            TradeInfo{bestAskPrice, tradeQty, askOrder->getOrderId(), Symbol(toSymbolString(askOrder->getSymbolId()))}
         });
 
         if (bidOrder->isFilled()) {
             bidQueue.pop_front();
-            book.orders_.erase(bidOrder->getOrderId());
-            orderToBook_.erase(bidOrder->getOrderId());
+            eraseOrderLocatorUnlocked(bidOrder->getOrderId());
         }
 
         if (askOrder->isFilled()) {
             askQueue.pop_front();
-            book.orders_.erase(askOrder->getOrderId());
-            orderToBook_.erase(askOrder->getOrderId());
+            eraseOrderLocatorUnlocked(askOrder->getOrderId());
         }
 
         if (bidQueue.empty()) {
@@ -366,8 +462,10 @@ void Orderbook::printOrderBook() const
 {
     std::cout << "Order Book:\n";
 
-    for (const auto& [symbol, book] : books_) {
-        std::cout << "Symbol: " << symbol << "\n";
+    for (std::size_t i = 0; i < kKnownSymbolCount; ++i) {
+        const SymbolId symbolId = static_cast<SymbolId>(i);
+        const auto& book = books_[i];
+        std::cout << "Symbol: " << toSymbolString(symbolId) << "\n";
         std::cout << "Bids:\n";
         for (const auto& [price, orders] : book.bids_) {
             Quantity totalQty = 0;

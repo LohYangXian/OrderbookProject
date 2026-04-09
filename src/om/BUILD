@@ -8,6 +8,7 @@ cc_library(
         "Usings.h",
         "Side.h",
         "Order.h",
+        "OrderPool.h",
         "TradeInfo.h",
         "Trade.h",
         "OrderModify.h",

@@ -22,3 +22,15 @@ cc_binary(
         "@nlohmann_json//:json",
         ],
 )
+
+cc_binary(
+    name = "main_engine_benchmark",
+    srcs = ["main_engine_benchmark.cpp"],
+    copts = [
+        "-std=c++20",
+        ],
+    deps = [
+        "//src/om:Orderbook",
+        "@nlohmann_json//:json",
+        ],
+)

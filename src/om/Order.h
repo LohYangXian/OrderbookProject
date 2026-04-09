@@ -13,14 +13,14 @@ public:
         Price price,
         Quantity quantity,
         Side side,
-        Symbol symbol
+        SymbolId symbolId
     )
     : orderId_{id}
     , price_{price}
     , quantity_{quantity}
     , unfilledQuantity_{quantity}
     , side_{side}
-    , symbol_{std::move(symbol)}
+    , symbolId_{symbolId}
     { }
 
     OrderId getOrderId() const { return orderId_; } 
@@ -28,7 +28,7 @@ public:
     Quantity getQuantity() const { return quantity_; }
     Quantity getUnfilledQuantity() const { return unfilledQuantity_; }
     Side getSide() const { return side_; }
-    Symbol getSymbol() const { return symbol_; }
+    SymbolId getSymbolId() const { return symbolId_; }
 
     bool isFilled() const { return unfilledQuantity_ == 0; }
     void fill(Quantity qty) { 
@@ -45,7 +45,7 @@ private:
     Quantity quantity_;
     Quantity unfilledQuantity_;
     Side side_;
-    Symbol symbol_;
+    SymbolId symbolId_;
 };
 
 

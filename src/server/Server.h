@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Orderbook.h"
+#include <string_view>
 #include <string>
 
 class Server {
@@ -12,6 +13,5 @@ private:
     int port_;
     Orderbook* orderbook_;
     void handleClient(int clientSocket);
-    std::string receiveMessage(int clientSocket);
-    void sendMessage(int clientSocket, const std::string& message);
+    void sendMessage(int clientSocket, std::string_view message);
 };

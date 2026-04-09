@@ -5,19 +5,19 @@
 class OrderModify
 {
 public:
-    OrderModify(OrderId orderId, Price price, Quantity quantity, Side side, Symbol symbol)
+    OrderModify(OrderId orderId, Price price, Quantity quantity, Side side, SymbolId symbolId)
     : orderId_{ orderId }
     , price_{ price }
     , quantity_{ quantity }
     , side_{ side }
-    , symbol_{ std::move(symbol) }
+    , symbolId_{ symbolId }
     { }
 
     OrderId getOrderId() const { return orderId_; }
     Price getPrice() const { return price_; }
     Quantity getQuantity() const { return quantity_; }
     Side getSide() const { return side_; }
-    Symbol getSymbol() const { return symbol_; }
+    SymbolId getSymbolId() const { return symbolId_; }
 
     OrderPointer toOrderPointer() const 
     {
@@ -26,7 +26,7 @@ public:
             getPrice(),
             getQuantity(),
             getSide(),
-            getSymbol()
+            getSymbolId()
         );
     }
 private:
@@ -34,5 +34,5 @@ private:
     Price price_;
     Quantity quantity_;
     Side side_;
-    Symbol symbol_;
+    SymbolId symbolId_;
 };
