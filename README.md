@@ -19,7 +19,7 @@ For a full Windows setup walkthrough (WSL install, Ubuntu setup, toolchain insta
   - Add / Modify / Cancel Orders
   - Order Matching
   - Trade Generation
-- Support **generic JSON orders** for flexibility
+- Support **simplified FIX 4.2 style orders** over TCP
 - Client - Server architecture to simulate real-world order submission and acknowledgment
 - Measure **Round Trip Time (RTT)** from order submission to acknowledgment
 - Optimize aggressively with a focus on **nanosecond-level latency** and **throughput scaling**.
@@ -33,7 +33,7 @@ This project is meant as my pet project to learn **C++**, **systems-level thinki
 
           +-----------------+
           |      Client     |
-          | (JSON Orders)   |
+          | (FIX Orders)   |
           +--------+--------+
                    |
                    v
@@ -55,7 +55,7 @@ This project is meant as my pet project to learn **C++**, **systems-level thinki
                    v
           +-----------------+
           |      Server     |
-          | (JSON Response) |
+          | (ACK Response)  |
           +--------+--------+
                    |
                    v
@@ -64,7 +64,7 @@ This project is meant as my pet project to learn **C++**, **systems-level thinki
           +-----------------+
 
 
-Client sends JSON orders to Server -> Server processes orders through Order Book Engine -> Server returns JSON responses indicating trade execution or order addition.
+Client sends FIX orders to Server -> Server processes orders through Order Book Engine -> Server returns line-delimited acknowledgments (`OK`, `ERR`, or `ID:<order_id>`).
 
 **Round Trip Time** (RTT) is measured from Client order submission to Server acknowledgment.
 
@@ -76,32 +76,31 @@ Performance metrics such as **latency** (ns/op), **throughput** (orders/sec), an
 
 - **Language**: C++20
 - **Build**: Bazel
-- **Testing/Benchmarking**:
-  - Google Benchmark
-  - `std::chrono` + `rdtsc`
-  - `Apple's Time Profiler` for CPU profiling
-- **Data Source**:
-  - Binance WebSocket API (`btcusdt@depth`, `btcusdt@trade`)
-  - Historical feeds for reproducibility
+- **Testing**: Bazel `cc_test` (assert-style unit/integration test in `tests/orderbook_test.cpp`)
+- **Benchmarking**:
+  - Engine throughput benchmark (`src/main_engine_benchmark.cpp`)
+  - End-to-end RTT workload from Python client (`py_client/client.py`) or built-in workload (`scripts/profile_server_perf.sh`)
+- **Profiling**: Linux `perf` (with WSL-compatible fallback binary detection)
 
 ---
 
 ## Benchmarking Methodology
 
-At each iteration:
-1. Replay the **same set of orders** through the engine.
-2. Record metrics:
-   - Average latency (ns/op)
-   - p50, p99, p999 latency
-   - Throughput (orders/sec)
-   - Memory allocations, cache misses (optional)
-3. Log results in `results.csv`
-4. Plot latency/throughput across iterations
+Current measurements in this repo use two complementary paths:
 
+1. **Engine-only throughput path**
+  - Run `//src:main_engine_benchmark` with a pre-generated FIX workload.
+  - Measure processed messages and throughput (msgs/s).
 
-### Using `Apple's Time Profiler` to Measure Performance
+2. **Server RTT path**
+  - Run `//src:main_server` and drive traffic with either:
+    - built-in workload in `scripts/profile_server_perf.sh`, or
+    - custom client command (for example `python3 py_client/client.py`).
+  - Measure end-to-end RTT and throughput under configurable concurrency/pipeline depth.
 
-The time profiler is attached to the server process to measure CPU usage and latency.
+3. **Profiler path**
+  - Run Linux `perf` sampling against the live server process.
+  - Export symbol-level reports (`perf-report.txt`) for hotspot analysis.
 
 ---
 
@@ -117,13 +116,15 @@ bazel build //src:main_server
 bazel run //src:main_server
 ```
 
+### Run the Engine Benchmark:
+```bash
+bazel run //src:main_engine_benchmark -- 10 2000000
+```
+
 ### Run the Tests:
 ```bash
 bazel test //tests:orderbook_test
 ```
-
-### Run the Client:
-Just open `py_client/client.ipynb` in Jupyter and run the cells.
 
 ### Profile Server-Side Functions (Linux/WSL)
 
@@ -146,98 +147,109 @@ To control built-in load concurrency, pass `num_threads` as the 4th argument:
 ```bash
 ./scripts/profile_server_perf.sh 20 results/profile_run_01 "" 4
 ```
-When a custom `client_command` is provided, `num_threads` is ignored.
 
-3. Optional: run client workload automatically while profiling:
-```bash
-./scripts/profile_server_perf.sh 20 results/profile_run_01 "python3 py_client/client.py"
-```
-Use this when you want to profile with your own workload instead of the built-in one.
-
-4. Read results:
+3. Read results:
 - `results/profile_run_01/perf-report.txt` for hot functions
 - `results/profile_run_01/server.log` for server runtime logs
-
-Notes:
-- The script builds with `-g` and `-fno-omit-frame-pointer` to improve stack quality.
-- If `perf record` fails due permissions, try:
-```bash
-sudo sysctl kernel.perf_event_paranoid=1
-sudo sysctl kernel.kptr_restrict=0
-```
 
 ---
 
 ## Versions of Orderbook Engine
 
-### v0: Baseline Implementations
-- Implement basic order book engine with naive data structures (e.g. `std::map`, `std::list`).
-- Support limit orders, order adding, order modifying, order cancelling, order matching and trade generation.
-- Basic mutex locking for thread safety.
-- Cover workflow from order ingestion to matching to trade generation.
-- Measure baseline latency and throughput using `std::chrono`, `rdtsc`, and `Apple's Time Profiler`.
+This section tracks the engine evolution as a sequence of deliberate design decisions and measured outcomes.
 
-#### v0: Benchmark Results
+### Benchmark context for fair interpretation
+- v0 processes JSON messages (`processJsonMessage`) and does not use symbol-aware FIX routing.
+- v1 and v2 process FIX messages with symbols (`processFixMessage`).
+- The protocol stack is therefore part of the measured latency/throughput, which reflects real pipeline cost rather than matching-only microbenchmarks.
 
-**Single-threaded (1 thread, 50,000 orders):**
+### Engine-only benchmark summary (same harness settings)
 
-- **Throughput:** 2,661 orders/sec
-- **RTT stats (ALL):** mean = 323.26μs, p95 = 435μs, p99 = 666μs
-- **NEW orders:** mean = 329.82μs, p95 = 444μs, p99 = 677.67μs
-- **MODIFY orders:** mean = 315.66μs, p95 = 409μs, p99 = 632μs
-- **CANCEL orders:** mean = 292.80μs, p95 = 396μs, p99 = 616.90μs
+Run settings:
+- Duration: 8 seconds
+- Pre-generated workload: 500,000 messages
+- Latency sampling: every 256 messages
 
-![RTT Histogram 1 thread](/results/v0/RTT_ALL_single.png)
+| Version | Protocol | Processed | Throughput (msgs/s) | Mean us | P50 us | P95 us | P99 us |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| v0 | JSON | 2,381,059 | 297,632 | 2.76 | 2 | 7 | 11 |
+| v1 | FIX | 10,092,759 | 1,261,590 | 0.27 | 0 | 1 | 2 |
+| v2 | FIX | 19,246,057 | 2,405,760 | 0.04 | 0 | 0 | 1 |
 
-![RTT Histogram NEW](/results/v0/RTT_NEW_single.png)
-![RTT Histogram MODIFY](/results/v0/RTT_MODIFY_single.png)
-![RTT Histogram CANCEL](/results/v0/RTT_CANCEL_single.png)
+Relative throughput gains:
+- v1 vs v0: 4.24x
+- v2 vs v1: 1.91x
+- v2 vs v0: 8.08x
 
+### v0: Baseline (JSON)
 
-**Multi-threaded (4 threads, 50,000 orders):**
+What was implemented:
+- Core order-book flow with add/modify/cancel/match/trade generation.
+- Conventional STL-first design (`std::map`/`std::list`) and mutex-based synchronization.
+- End-to-end client/server RTT measurement to establish a baseline envelope.
 
-- **Throughput:** 5,194 orders/sec
-- **RTT stats (ALL):** mean = 721.34μs, p95 = 1,126μs, p99 = 1,601μs
-- **NEW orders:** mean = 720.08μs, p95 = 1,133.20μs, p99 = 1,585.88μs
-- **MODIFY orders:** mean = 741.44μs, p95 = 1,111μs, p99 = 1,636.16μs
-- **CANCEL orders:** mean = 690.06μs, p95 = 1,097.35μs, p99 = 1,566.40μs
+What profiling showed:
+- High time share in JSON object construction/destruction plus allocator churn.
+- Under server RTT tests, lock contention became visible under multi-thread load.
 
-![RTT Histogram 4 threads](/results/v0/RTT_ALL_4threads.png)
-![RTT Histogram NEW](/results/v0/RTT_NEW_4threads.png)
-![RTT Histogram MODIFY](/results/v0/RTT_MODIFY_4threads.png)
-![RTT Histogram CANCEL](/results/v0/RTT_CANCEL_4threads.png)
+Interpretation:
+- v0 is a useful correctness baseline, but protocol overhead and synchronization strategy limit headroom for low-latency goals.
 
+Legacy RTT histograms (client/server path):
 
-![V0 CPU Profiler Flamegraph](/results/v0/flamegraph.png)
+![v0 RTT Histogram (1 thread)](results/v0/RTT_ALL_single.png)
+![v0 RTT Histogram (4 threads)](results/v0/RTT_ALL_4threads.png)
 
-![V0 CPU Profiler Latency](/results/v0/latency.png)
+Engine-only latency histogram:
 
-| Function                                 | % CPU | Notes                                        |
-| ---------------------------------------- | ----- | -------------------------------------------- |
-| `lck_mtx_sleep`                          | 76.7% | Threads blocked on mutexes / lock contention |
-| JSON parsing / serialization             | <1%   | Minor CPU usage                              |
-| `tiny_malloc_should_clear` / `free_tiny` | ~1%   | Minimal memory overhead                      |
+![v0 Engine Latency Histogram](results/engine_compare/engine_latency_hist_v0.png)
 
+### v1: FIX + symbol-aware books (first major performance step)
 
-#### **Summary & Analysis**
+What changed:
+- Introduced simplified FIX ingestion and symbol-aware book routing.
+- Added order ownership mapping for faster cancel/modify lookup.
+- Shifted cost from JSON handling toward actual matching and order lifecycle logic.
 
-- **Single-threaded performance** achieves lower latency and more consistent RTTs, but throughput is limited by lack of parallelism.
-- **Multi-threaded mode** nearly doubles throughput, but increases mean and tail latencies (p95/p99), likely due to lock contention and resource sharing.
-- **NEW, MODIFY, and CANCEL** order types have similar latency profiles, with CANCEL being slightly faster on average.
-- **RTT histograms** show a tight distribution for single-threaded, and a wider spread with higher outliers for multi-threaded, indicating more variability under concurrency.
-- **CPU profiling** reveals that the majority of CPU time is spent waiting on mutexes (`lck_mtx_sleep`), not on actual order processing or JSON parsing.
-- **Optimization opportunities:**  
-  - Reduce lock contention and improve data structure efficiency for better multi-threaded scaling.
-  - Profile and optimize critical paths in order processing and matching.
+What profiling showed:
+- Hot path is now `processFixMessage`, `addOrder`, and `matchOrders`.
+- Remaining overhead is mostly parsing, hash lookups, and allocation/free traffic.
 
-*These results provide a baseline for future optimizations and highlight the tradeoff between throughput and latency as concurrency increases.*
+Engine-only latency histogram:
+
+![v1 Engine Latency Histogram](results/engine_compare/engine_latency_hist_v1.png)
+
+### v2: allocator and locator-focused optimization
+
+What changed:
+- Introduced pooled order allocation (`OrderPool`) to reduce allocation overhead.
+- Moved toward more cache-friendly lookup and locator behavior, vectors instead of unordered maps.
+- Kept FIX+symbol architecture while tightening the hot path.
+
+What profiling showed:
+- Same primary hotspots (`processFixMessage`, `addOrder`, `matchOrders`), but improved work per cycle.
+- Lower relative allocator pressure per message at materially higher throughput.
+
+Interpretation:
+- v2 is the strongest balance so far between maintainability and realistic low-latency behavior.
+- The optimization direction is now aligned with HFT constraints: reduce dynamic allocation, simplify ownership lookups, and keep critical paths predictable.
+
+Engine-only latency histogram:
+
+![v2 Engine Latency Histogram](results/engine_compare/engine_latency_hist_latest.png)
+
+Combined histogram view:
+
+![Engine Latency Histograms (all versions)](results/engine_compare/engine_latency_hist_all_versions.png)
 
 ---
 
-## v1: Replace Mutex Locks with Faster Alternatives
-- TODO: Find a faster locking mechanism (e.g. spinlocks, reader-writer locks) or use lock-free data structures.
-- Measure impact on latency and throughput. 
-- Analyze CPU profiling to see if lock contention is reduced.
+## Future Ideas
+
+- Evaluate a **single-writer per symbol (or symbol shard)** architecture so matching logic can run without mutexes on the hot path.
+- Use **lock-free MPSC queues** at the boundary (network threads -> matching workers) instead of shared mutable state across threads.
+- Keep ordering deterministic (price-time priority) by preserving strict in-thread sequencing for each shard.
+- Compare this model against the current mutex design using the same benchmark harness and `perf` workflow.
 
 ---
 
@@ -256,13 +268,7 @@ sudo sysctl kernel.kptr_restrict=0
 - Market Microstructure Theory, by Maureen O'Hara
 - [OrderBook Repository by TheCodingJesus](https://github.com/Tzadiko/Orderbook/tree/master)
 
+### AI Coding Assistants
+- GitHub Copilot (Helped me improve from v1 to v2 with suggestions on allocator design and lookup optimizations)
+
 ---
-
-## TODO
-- Implement v1 optimizations and benchmark.
-  - Replace mutexes with faster alternatives.
-
-- Implement v2 optimizations and benchmark.
-  - Optimize data structures for order storage and matching.
-  - Explore memory pool allocators to reduce allocation overhead.
-  - Optimize JSON parsing/serialization if it becomes a bottleneck.
