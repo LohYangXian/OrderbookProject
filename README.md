@@ -160,7 +160,7 @@ This section tracks the engine evolution as a sequence of deliberate design deci
 
 ### Benchmark context for fair interpretation
 - v0 processes JSON messages (`processJsonMessage`) and does not use symbol-aware FIX routing.
-- v1 and v2 process FIX messages with symbols (`processFixMessage`).
+- v1, v2, and v3 process FIX messages with symbols (`processFixMessage`).
 - The protocol stack is therefore part of the measured latency/throughput, which reflects real pipeline cost rather than matching-only microbenchmarks.
 
 ### Engine-only benchmark summary (same harness settings)
@@ -175,11 +175,17 @@ Run settings:
 | v0 | JSON | 2,381,059 | 297,632 | 2.76 | 2 | 7 | 11 |
 | v1 | FIX | 10,092,759 | 1,261,590 | 0.27 | 0 | 1 | 2 |
 | v2 | FIX | 19,246,057 | 2,405,760 | 0.04 | 0 | 0 | 1 |
+| v3 | FIX | 25,024,832 | 3,128,104 | 0.03 | 0 | 0 | 1 |
 
 Relative throughput gains:
 - v1 vs v0: 4.24x
 - v2 vs v1: 1.91x
-- v2 vs v0: 8.08x
+- v3 vs v2: 1.30x
+- v3 vs v0: 10.50x
+
+Summary plots from the table above:
+
+![Engine Throughput by Version](results/engine_compare/engine_throughput_by_version.png)
 
 ### v0: Baseline (JSON)
 
@@ -236,7 +242,22 @@ Interpretation:
 
 Engine-only latency histogram:
 
-![v2 Engine Latency Histogram](results/engine_compare/engine_latency_hist_latest.png)
+![v2 Engine Latency Histogram](results/engine_compare/engine_latency_hist_v2.png)
+
+### v3: parsing/string-formatting cleanup on the hot path
+
+What changed:
+- Simplified FIX parsing and response handling code paths to reduce repeated string handling branches in `processFixMessage`.
+- Cleaned up FIX tag and response constant organization for tighter, easier-to-follow fast-path logic.
+- Reduced temporary string work around request/response handling so the server spends more time in actual order processing.
+
+What this optimization targets:
+- Lower CPU overhead in message parse/response formatting work.
+- Improve maintainability of the hot path while keeping behavior stable.
+
+Engine-only latency histogram:
+
+![v3 Engine Latency Histogram](results/engine_compare/engine_latency_hist_v3.png)
 
 Combined histogram view:
 
@@ -269,6 +290,6 @@ Combined histogram view:
 - [OrderBook Repository by TheCodingJesus](https://github.com/Tzadiko/Orderbook/tree/master)
 
 ### AI Coding Assistants
-- GitHub Copilot (Helped me improve from v1 to v2 with suggestions on allocator design and lookup optimizations)
+- GitHub Copilot (Helped me improve from v1 to v3 with suggestions on allocator design and lookup optimizations)
 
 ---

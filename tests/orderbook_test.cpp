@@ -4,8 +4,8 @@
 
 int main() {
     Orderbook ob;
-    const SymbolId symbol = SymbolId::NVDA;
-    const SymbolId otherSymbol = SymbolId::AAPL;
+    const SymbolId symbol = 0;
+    const SymbolId otherSymbol = 1;
 
     // 1. Add a new BUY order
     auto buyOrder = std::make_shared<Order>(1, 10000, 5, Side::BUY, symbol);

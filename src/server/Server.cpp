@@ -108,7 +108,7 @@ void Server::handleClient(int clientSocket) {
             }
 
             if (!frame.empty()) {
-                const std::string response = orderbook_->processFixMessage(std::string(frame));
+                const std::string response = orderbook_->processFixMessage(frame);
                 sendBuffer.append(response);
                 sendBuffer.push_back('\n');
             }

@@ -9,7 +9,6 @@ cc_binary(
     deps = [
         "//src/server:Server",
         "//src/om:Orderbook",
-        "@nlohmann_json//:json",
         ],
 )
 
@@ -21,6 +20,5 @@ cc_binary(
         ],
     deps = [
         "//src/om:Orderbook",
-        "@nlohmann_json//:json",
         ],
 )

@@ -143,7 +143,7 @@ def generate_requests(thread_id: int, count: int):
 
   for _ in range(count):
     order_type = rng.choices(["NEW", "MODIFY", "CANCEL"], weights=[0.75, 0.2, 0.05])[0]
-    symbol = rng.choice(["NVDA", "AAPL", "TSLA"])
+    symbol = str(rng.randint(0, 499))
     side_tag = "1" if rng.choice(["BUY", "SELL"]) == "BUY" else "2"
 
     if order_type == "NEW" or not open_ids:

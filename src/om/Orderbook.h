@@ -19,7 +19,7 @@ class Orderbook
 {
 private:
     static constexpr std::size_t kPreallocatedOrderCapacity = 5'000'000;
-    static constexpr std::size_t kKnownSymbolCount = static_cast<std::size_t>(SymbolId::Unknown);
+    static constexpr std::size_t kSymbolCount = static_cast<std::size_t>(kKnownSymbolCount);
 
     OrderPool orderPool_;
 
@@ -34,7 +34,7 @@ private:
         SymbolBook* book_{ nullptr };
     };
 
-    std::array<SymbolBook, kKnownSymbolCount> books_;
+    std::array<SymbolBook, kSymbolCount> books_;
     std::vector<OrderLocator> orderLocators_;
     std::unordered_map<OrderId, OrderLocator> overflowOrderLocators_;
     mutable std::mutex ordersMutex_;
@@ -60,7 +60,7 @@ public:
     void processBinanceMessage(const std::string& message);
     
     // Process simplified FIX messages (tag=value|tag=value|...)
-    std::string processFixMessage(const std::string& message);
+    std::string processFixMessage(const std::string_view message);
 
     Trades addOrder(const OrderPointer& order);
    

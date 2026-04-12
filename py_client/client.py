@@ -18,7 +18,7 @@ def generate_requests(num_orders):
 
     for _ in range(num_orders):
         order_type = random.choices(["NEW", "MODIFY", "CANCEL"], weights=[0.7, 0.2, 0.1])[0]
-        symbol = random.choice(["NVDA", "AAPL", "TSLA"])
+        symbol = str(random.randint(0, 499))
         side_tag = "1" if random.choice(["BUY", "SELL"]) == "BUY" else "2"
 
         if order_type == "NEW" or not order_ids:

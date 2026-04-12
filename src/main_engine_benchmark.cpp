@@ -15,22 +15,20 @@ std::vector<std::string> buildWorkload(std::size_t count) {
 
     std::mt19937 rng(12345);
     std::uniform_int_distribution<int> sideDist(0, 1);
-    std::uniform_int_distribution<int> symbolDist(0, 2);
+    std::uniform_int_distribution<int> symbolDist(0, static_cast<int>(kKnownSymbolCount - 1));
     std::uniform_int_distribution<int> priceDist(90'000, 110'000);
     std::uniform_int_distribution<int> qtyDist(1, 10);
 
-    static constexpr const char* kSymbols[] = {"NVDA", "AAPL", "TSLA"};
-
     for (std::size_t i = 0; i < count; ++i) {
         const std::uint64_t orderId = static_cast<std::uint64_t>(i + 1);
-        const char* symbol = kSymbols[symbolDist(rng)];
+        const std::string symbol = std::to_string(symbolDist(rng));
         const char* side = sideDist(rng) == 0 ? "1" : "2";
         const std::uint32_t price = static_cast<std::uint32_t>(priceDist(rng));
         const std::uint32_t qty = static_cast<std::uint32_t>(qtyDist(rng));
 
         messages.push_back(
             std::string("8=FIX.4.2|35=D|11=") + std::to_string(orderId) +
-            "|55=" + std::string(symbol) +
+            "|55=" + symbol +
             "|54=" + std::string(side) +
             "|44=" + std::to_string(price) +
             "|38=" + std::to_string(qty) + "|");

@@ -1,0 +1,14 @@
+Engine benchmark starting
+Duration: 8s
+Pre-generated messages: 500000
+Latency sample stride: every 256 messages
+Latency CSV output: /mnt/c/Users/yangx/OrderbookProject/OrderbookProject/results/engine_compare/engine_latency_samples_v3.csv
+Processed: 13672022 messages
+Elapsed: 8s
+Throughput: 1.709e+06 msgs/s
+Latency samples: 53407
+Mean latency (us): 0.673
+P50 latency (us): 0.522
+P95 latency (us): 1.280
+P99 latency (us): 2.076
+Wrote latency samples to: /mnt/c/Users/yangx/OrderbookProject/OrderbookProject/results/engine_compare/engine_latency_samples_v3.csv
