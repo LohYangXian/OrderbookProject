@@ -269,8 +269,8 @@ Combined histogram view:
 
 - Evaluate a **single-writer per symbol (or symbol shard)** architecture so matching logic can run without mutexes on the hot path.
 - Use **lock-free MPSC queues** at the boundary (network threads -> matching workers) instead of shared mutable state across threads.
-- Keep ordering deterministic (price-time priority) by preserving strict in-thread sequencing for each shard.
-- Compare this model against the current mutex design using the same benchmark harness and `perf` workflow.
+- Explore ring buffers to handle order events in a more cache-friendly way.
+- Refactoring logging and response formatting away from the hot path, potentially with a separate thread or async mechanism to avoid blocking the critical path.
 
 ---
 
